@@ -1,10 +1,10 @@
 #include <libfreenect.hpp>
 #include <iostream>
-#include <vector>
 #include <memory>
 
 
 const freenect_resolution RESOLUTION = FREENECT_RESOLUTION_MEDIUM;
+
 
 
 class VRCarVision : public Freenect::FreenectDevice {
@@ -23,38 +23,43 @@ public:
         setLed(LED_BLINK_GREEN);
     }
 
-    void VideoCallback(void* rgbData, uint32_t timestamp) override 
+    void VideoCallback(void* newFrame, uint32_t timestamp) override 
     {
-        if (auto videoData = _videoData.lock()) { // create shared_ptr if _videoData is null or deleted
-            /*Mutex::ScopedLock lock(m_rgb_mutex);
-            uint8_t* rgb = static_cast<uint8_t*>(_rgb);
-            std::copy(rgb, rgb+getVideoBufferSize(), m_buffer_video.begin());
-            m_new_rgb_frame = true;*/
+        if (_rgbData != nullptr) {
+            uint8_t* frameData = static_cast<uint8_t*>(newFrame);
+            std::copy(frameData, frameData + getVideoBufferSize(), _rgbData.get());
             _hasRGBData = true;
         }
     }
 
-    void DepthCallback(void* depthData, uint32_t timestamp)
+    void DepthCallback(void* newFrame, uint32_t timestamp)
     {
-        if (auto videoData = _videoData.lock()) { // create shared_ptr if _videoData is null or deleted
+        if (_depthData != nullptr) {
+            uint8_t* frameData = static_cast<uint8_t*>(newFrame);
+            std::copy(frameData, frameData + getDepthBufferSize(), _depthData.get());
             _hasDepthData = true;
         }
     }
 
-    void initializeVideo(std::weak_ptr<std::vector<uint8_t>> _videoData, freenect_resolution resolution)
+    void initializeVideo(freenect_resolution resolution)
     {
-        this->_videoData = _videoData;
         setVideoFormat(FREENECT_VIDEO_RGB, resolution);
+        _rgbData.reset(new uint8_t[getVideoBufferSize()]);
+        _depthData.reset(new uint8_t[getDepthBufferSize()]);
         startVideo();
         startDepth();
     }
 
     bool hasVideoData() { return _hasDepthData && _hasRGBData; }
 
+    uint8_t* rgbData() { return _rgbData.get(); }
+    uint8_t* depthData() { return _depthData.get(); }
+
 private:
-    std::weak_ptr<std::vector<uint8_t>> _videoData; // HAVE TO DO THIS WHOLE POINTER THING BECAUSE VRCarVision CAN ONLY BE CONSTRUCTED USING freenect.createDevice SO CONSTRUCTOR CANT TAKE ANY REFERENCES WHICH MEANS _videoData CANT BE A REFERENCE
     bool _hasDepthData; // to avoid sending garbage, keep track of whether _videoData has been filled with real data or not
     bool _hasRGBData; 
+    std::unique_ptr<uint8_t[]> _rgbData;
+    std::unique_ptr<uint8_t[]> _depthData;
 };
 
 
@@ -65,10 +70,7 @@ int main()
     VRCarVision* device = &freenect.createDevice<VRCarVision>(0);
     device->setLed(LED_RED);
 
-    std::shared_ptr<std::vector<uint8_t>> videoData(
-        new std::vector<uint8_t> // HAVE TO ALLOCATE FROM HEAP because otherwise we'd be tossing around a variable AND a shared_ptr to that variable and when they both go out of scope the original variable will be destructed first, leading to the shared_ptr throwing an error about being unable to free()
-    );
-    device->initializeVideo(videoData, RESOLUTION);
+    device->initializeVideo(RESOLUTION);
 
     device->setLed(LED_YELLOW);
     while (! device->hasVideoData()) {}
@@ -76,7 +78,7 @@ int main()
 
     while (1) {
         double degrees;
-        std::cout << "degrees to move: ";
+        std::cout << "degrees to move (enter value >30 to exit): ";
         std::cin >> degrees;
         if (degrees > 30) {
             break;
