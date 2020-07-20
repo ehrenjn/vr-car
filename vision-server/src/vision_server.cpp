@@ -2,6 +2,10 @@
 #include <iostream>
 #include <memory>
 
+#include <sys/socket.h>
+#include <netinet/in.h> // consts and structs for use with sockets
+#include <errno.h> // to get error numbers after system call errors
+
 
 const freenect_resolution RESOLUTION = FREENECT_RESOLUTION_MEDIUM;
 
@@ -64,17 +68,37 @@ private:
 
 
 
+void errIfNegative(const int val, const char* errorMessage) 
+{
+    if (val < 0) {
+        std::cerr << "ERROR: " << errorMessage << std::endl; // print to stderr instead of stdout
+        std::cerr << "last error code: " << errno << std::endl; // print latest system error
+        exit(69); // a classic
+    }
+}
+
+
+void runServer(VRCarVision* kinect) 
+{
+    int server = socket(AF_INET, SOCK_DGRAM, 0); // AF_INET = ipv4, SOCK_DGRAM = datagram socket, 0 = default protocol = UDP (since it's a datagram socket) 
+    errIfNegative(server, "couldn't create server socket");
+}
+
+
+
 int main() 
 {
     Freenect::Freenect freenect;
-    VRCarVision* device = &freenect.createDevice<VRCarVision>(0);
-    device->setLed(LED_RED);
+    VRCarVision* kinect = &freenect.createDevice<VRCarVision>(0);
+    kinect->setLed(LED_RED);
 
-    device->initializeVideo(RESOLUTION);
+    kinect->initializeVideo(RESOLUTION);
 
-    device->setLed(LED_YELLOW);
-    while (! device->hasVideoData()) {}
-    device->setLed(LED_GREEN);
+    kinect->setLed(LED_YELLOW);
+    while (! kinect->hasVideoData()) {}
+    kinect->setLed(LED_GREEN);
+
+    runServer(kinect);
 
     while (1) {
         double degrees;
@@ -83,7 +107,7 @@ int main()
         if (degrees > 30) {
             break;
         }
-        device->setTiltDegrees(degrees);
+        kinect->setTiltDegrees(degrees);
     }
 
     return 0;
