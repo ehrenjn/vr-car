@@ -8,7 +8,7 @@
 
 
 const freenect_resolution RESOLUTION = FREENECT_RESOLUTION_MEDIUM;
-
+unsigned short SERVER_PORT = 6969;
 
 
 class VRCarVision : public Freenect::FreenectDevice {
@@ -82,6 +82,40 @@ void runServer(VRCarVision* kinect)
 {
     int server = socket(AF_INET, SOCK_DGRAM, 0); // AF_INET = ipv4, SOCK_DGRAM = datagram socket, 0 = default protocol = UDP (since it's a datagram socket) 
     errIfNegative(server, "couldn't create server socket");
+    
+    // server IP object
+    in_addr serverIp; // in_addr is a struct with few members but the only one we need to set is IP
+    serverIp.s_addr = INADDR_ANY; // INADDR_ANY is equivilant to '0.0.0.0' (listen on all available IPs)
+
+    // full server address struct
+    sockaddr_in serverAddress; // sockaddr_in is an internet socket address
+    serverAddress.sin_family = AF_INET; // AF_INET because internet socket
+    serverAddress.sin_port = htons(SERVER_PORT); // htos to convert to big endian (aka network byte order)
+    serverAddress.sin_addr = serverIp;
+
+    // 0 fill garbarge part of address object that has to be all 0 (why does this exist?)
+    uint8_t* sin_zeroStart = static_cast<uint8_t*>(serverAddress.sin_zero);
+    uint8_t* sin_zeroEnd = sin_zeroStart + sizeof(serverAddress.sin_zero);
+    for (uint8_t* chr = sin_zeroStart; chr < sin_zeroEnd; chr++) {
+        *chr = '\0'; 
+    }
+    
+    int result = bind(
+        server, 
+        reinterpret_cast<sockaddr*>(&serverAddress), // have to cast server address to more generic sockaddr type (CAN SAFELY USE reinterpret_cast HERE BECAUSE IT'S JUST GOING FROM ONE POINTER TO ANOTHER AND WE'RE PASSING IN THE SIZE OF serverAddress SO IT KNOWS HOW MUCH TO READ)
+        sizeof(serverAddress)
+    );
+    errIfNegative(result, "binding server socket failed");
+
+    /*
+    char buffer[100];
+    sockaddr_storage sender_address; // sender address will be stored in here when message is received
+    socklen_t sender_address_length = sizeof(sender_address); // amazing that socklen_t is its own type
+    recvfrom(
+        server, buffer, sizeof(buffer), 0, // receive message using server, starting at address 0 of buffer
+        reinterpret_cast<sockaddr*>(&sender_address), &sender_address_length // for some reason they want a pointer to the size of the address
+    );
+    */
 }
 
 
