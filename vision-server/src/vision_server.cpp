@@ -107,15 +107,20 @@ void runServer(VRCarVision* kinect)
     );
     errIfNegative(result, "binding server socket failed");
 
-    /*
     char buffer[100];
-    sockaddr_storage sender_address; // sender address will be stored in here when message is received
-    socklen_t sender_address_length = sizeof(sender_address); // amazing that socklen_t is its own type
-    recvfrom(
-        server, buffer, sizeof(buffer), 0, // receive message using server, starting at address 0 of buffer
-        reinterpret_cast<sockaddr*>(&sender_address), &sender_address_length // for some reason they want a pointer to the size of the address
+    sockaddr_storage clientAddress; // sender address will be stored in here when message is received
+    socklen_t clientAddressLength = sizeof(clientAddress); // amazing that socklen_t is its own type
+    result = recvfrom(
+        server, buffer, sizeof(buffer), 0, // receive message using server, 0 means we're not setting any special flags
+        reinterpret_cast<sockaddr*>(&clientAddress), &clientAddressLength // for some reason they want a pointer to the size of the address
     );
-    */
+    errIfNegative(result, "recvfrom failed");
+
+    result = sendto(
+        server, (void*)"response", 8, 0,
+        reinterpret_cast<sockaddr*>(&clientAddress), sizeof(clientAddress)
+    );
+    errIfNegative(result, "sendto failed");
 }
 
 
