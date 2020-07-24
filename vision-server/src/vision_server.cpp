@@ -8,7 +8,8 @@
 
 
 const freenect_resolution RESOLUTION = FREENECT_RESOLUTION_MEDIUM;
-unsigned short SERVER_PORT = 6969;
+const unsigned short SERVER_PORT = 6969;
+const int MESSAGE_CHUNK_SIZE = 10000;
 
 
 class VRCarVision : public Freenect::FreenectDevice {
@@ -58,6 +59,9 @@ public:
 
     uint8_t* rgbData() { return _rgbData.get(); }
     uint8_t* depthData() { return _depthData.get(); }
+    
+    int rgbDataSize() { return getVideoBufferSize(); } // getVideoBufferSize is protected so make wrapper method to call it
+    int depthDataSize() { return getDepthBufferSize(); }
 
 private:
     bool _hasDepthData; // to avoid sending garbage, keep track of whether _videoData has been filled with real data or not
@@ -107,20 +111,33 @@ void runServer(VRCarVision* kinect)
     );
     errIfNegative(result, "binding server socket failed");
 
-    char buffer[100];
     sockaddr_storage clientAddress; // sender address will be stored in here when message is received
     socklen_t clientAddressLength = sizeof(clientAddress); // amazing that socklen_t is its own type
     result = recvfrom(
-        server, buffer, sizeof(buffer), 0, // receive message using server, 0 means we're not setting any special flags
+        server, // receive message using server
+        nullptr, 0,  // set buffer to nullptr and buffer size to 0 (we just want client's address, not message)
+        0, // no special flags need to be set
         reinterpret_cast<sockaddr*>(&clientAddress), &clientAddressLength // for some reason they want a pointer to the size of the address
     );
     errIfNegative(result, "recvfrom failed");
 
-    result = sendto(
-        server, (void*)"response", 8, 0,
-        reinterpret_cast<sockaddr*>(&clientAddress), sizeof(clientAddress)
-    );
-    errIfNegative(result, "sendto failed");
+    std::cout << kinect->rgbDataSize() << std::endl;
+
+    uint8_t* dataEnd = kinect->rgbData() + kinect->rgbDataSize();
+    for (uint8_t* messageStart = kinect->rgbData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
+
+        int messageLength;
+        if ((messageStart + MESSAGE_CHUNK_SIZE) < dataEnd)
+            messageLength = MESSAGE_CHUNK_SIZE;
+        else
+            messageLength = dataEnd - messageStart;
+
+        result = sendto(
+            server, messageStart, messageLength, 0,
+            reinterpret_cast<sockaddr*>(&clientAddress), sizeof(clientAddress)
+        );
+        errIfNegative(result, "sendto failed");
+    }
 }
 
 
