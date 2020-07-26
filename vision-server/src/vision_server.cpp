@@ -23,7 +23,8 @@ const unsigned short SERVER_PORT = 6969;
 const int MESSAGE_CHUNK_SIZE = 10000;
 
 
-class VRCarVision : public Freenect::FreenectDevice {
+class VRCarVision : public Freenect::FreenectDevice 
+{
 public:
 
     VRCarVision(freenect_context* _ctx, int _index) : 
@@ -39,7 +40,7 @@ public:
         setLed(LED_BLINK_GREEN);
     }
 
-    void VideoCallback(void* newFrame, uint32_t timestamp) override 
+    void VideoCallback(void* newFrame, uint32_t) override 
     {
         if (_rgbData != nullptr) {
             uint8_t* frameData = static_cast<uint8_t*>(newFrame);
@@ -48,7 +49,7 @@ public:
         }
     }
 
-    void DepthCallback(void* newFrame, uint32_t timestamp)
+    void DepthCallback(void* newFrame, uint32_t)
     {
         if (_depthData != nullptr) {
             uint8_t* frameData = static_cast<uint8_t*>(newFrame);
@@ -94,7 +95,8 @@ void errIfNegative(const int val, const char* errorMessage)
 
 
 
-class UDPServer {
+class UDPServer 
+{
 public:
 
     UDPServer(unsigned short port) 
@@ -163,7 +165,7 @@ public:
     }
 
 
-    void send(sockaddr_storage clientAddress, uint8_t* messageStart, int messageLength)
+    void send(sockaddr_storage& clientAddress, uint8_t* messageStart, int messageLength)
     {
         int result = sendto(
             _server, messageStart, messageLength, 
@@ -181,23 +183,76 @@ private:
 
 
 
+class PartialArrayMessageBuffer
+{
+public:
+
+    // this struct needs to be POD in order to be reliably serialized so don't give it any methods
+    struct PartialArrayMetaData 
+    {
+        uint8_t dataType;
+        uint32_t initialIndex;
+    };
+
+
+    PartialArrayMessageBuffer(int arrayChunkSize)
+    {
+        _messageLength = 0;
+        _arrayChunkSize = arrayChunkSize;
+        int maximumPossibleBufferSize = arrayChunkSize + sizeof(PartialArrayMetaData);
+        _message.reset(new uint8_t[maximumPossibleBufferSize]);
+    }
+
+
+    void setMessage(uint8_t* array, int arraySize, uint8_t* startAddress, uint8_t dataType)
+    {
+        // store metadata in message buffer
+        PartialArrayMetaData metaData;
+        metaData.initialIndex = startAddress - array;
+        metaData.dataType = dataType;
+        *(reinterpret_cast<PartialArrayMetaData*>(_message.get())) = metaData; // store metadata at the start of the message buffer
+
+        // calculate final address in array for copying
+        uint8_t* arrayEnd = array + arraySize;
+        uint8_t* finalAddress;
+        if ((startAddress + _arrayChunkSize) < arrayEnd)
+            finalAddress = startAddress + _arrayChunkSize;
+        else
+            finalAddress = arrayEnd;
+        
+        // store data in message buffer
+        std::copy(
+            startAddress, finalAddress,
+            _message.get() + sizeof(metaData) // store rest of array after meta data
+        );
+
+        _messageLength = finalAddress - startAddress + sizeof(metaData);
+    }
+
+
+    uint8_t* getBytes() { return _message.get(); }
+    int getBytesLength() { return _messageLength; }
+
+private:
+    int _messageLength;
+    int _arrayChunkSize;
+    std::unique_ptr<uint8_t[]> _message;
+};
+
+
+
 void runServer(VRCarVision* kinect) 
 {
     UDPServer server(SERVER_PORT);
     auto client = server.receive();
+    PartialArrayMessageBuffer messageBuffer(MESSAGE_CHUNK_SIZE);
 
     for(;;) {
 
         uint8_t* dataEnd = kinect->rgbData() + kinect->rgbDataSize();
         for (uint8_t* messageStart = kinect->rgbData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
-
-            int messageLength;
-            if ((messageStart + MESSAGE_CHUNK_SIZE) < dataEnd)
-                messageLength = MESSAGE_CHUNK_SIZE;
-            else
-                messageLength = dataEnd - messageStart;
-
-            server.send(client, messageStart, messageLength);
+            messageBuffer.setMessage(kinect->rgbData(), kinect->rgbDataSize(), messageStart, 'r');
+            server.send(client, messageBuffer.getBytes(), messageBuffer.getBytesLength());
         }
 
         sockaddr_storage newClient;
