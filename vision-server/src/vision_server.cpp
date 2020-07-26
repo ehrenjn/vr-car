@@ -6,6 +6,8 @@ WHAT IF THE SERVER IS SENDING DATA TOO FAST? IS THAT POSSIBLE?
         these systems aren't "supposed" to receive every bit of video... so missing bits becuase we're too slow actually makes sense
 IT WOULD BE MORE OOP FOR SEND AND RECEIVE CALLS TO TAKE OR RETURN AN OBJECT THAT CONTAINS AN ADDRESS AND POINTER TO DATA, BUT MIGHT BE A MESS, IDK
     only bother doing this if you need to know length of message received I guess
+DATA STRUCTURE PADDING IN PartialArrayMessageBuffer MIGHT GET WEIRD IF ARCHETECTURES DONT PLAY WELL TOGETHER, MIGHT WANT TO DO PROPER SERIALIZATION (but thats annoying)
+    proper serialization would be close to what I had before realizing I could use POD
 */
 
 
@@ -20,7 +22,6 @@ IT WOULD BE MORE OOP FOR SEND AND RECEIVE CALLS TO TAKE OR RETURN AN OBJECT THAT
 
 const freenect_resolution RESOLUTION = FREENECT_RESOLUTION_MEDIUM;
 const unsigned short SERVER_PORT = 6969;
-const int MESSAGE_CHUNK_SIZE = 10000;
 
 
 class VRCarVision : public Freenect::FreenectDevice 
@@ -183,61 +184,41 @@ private:
 
 
 
-class PartialArrayMessageBuffer
+const int MESSAGE_CHUNK_SIZE = 10000;
+
+// needs to be POD in order to be reliably serialized
+struct PartialArrayMessageBuffer
 {
-public:
-
-    // this struct needs to be POD in order to be reliably serialized so don't give it any methods
-    struct PartialArrayMetaData 
-    {
-        uint8_t dataType;
-        uint32_t initialIndex;
-    };
-
-
-    PartialArrayMessageBuffer(int arrayChunkSize)
-    {
-        _messageLength = 0;
-        _arrayChunkSize = arrayChunkSize;
-        int maximumPossibleBufferSize = arrayChunkSize + sizeof(PartialArrayMetaData);
-        _message.reset(new uint8_t[maximumPossibleBufferSize]);
-    }
-
+    uint8_t dataType;
+    uint32_t initialIndex;
+    uint32_t messageLength;
+    uint8_t message[MESSAGE_CHUNK_SIZE];
 
     void setMessage(uint8_t* array, int arraySize, uint8_t* startAddress, uint8_t dataType)
     {
-        // store metadata in message buffer
-        PartialArrayMetaData metaData;
-        metaData.initialIndex = startAddress - array;
-        metaData.dataType = dataType;
-        *(reinterpret_cast<PartialArrayMetaData*>(_message.get())) = metaData; // store metadata at the start of the message buffer
-
         // calculate final address in array for copying
         uint8_t* arrayEnd = array + arraySize;
         uint8_t* finalAddress;
-        if ((startAddress + _arrayChunkSize) < arrayEnd)
-            finalAddress = startAddress + _arrayChunkSize;
+        if ((startAddress + MESSAGE_CHUNK_SIZE) < arrayEnd)
+            finalAddress = startAddress + MESSAGE_CHUNK_SIZE;
         else
             finalAddress = arrayEnd;
         
-        // store data in message buffer
-        std::copy(
-            startAddress, finalAddress,
-            _message.get() + sizeof(metaData) // store rest of array after meta data
-        );
-
-        _messageLength = finalAddress - startAddress + sizeof(metaData);
+        // update data
+        std::copy(startAddress, finalAddress, this->message);
+        this->dataType = dataType;
+        this->initialIndex = startAddress - array;
+        this->messageLength = finalAddress - startAddress;
     }
 
-
-    uint8_t* getBytes() { return _message.get(); }
-    int getBytesLength() { return _messageLength; }
-
-private:
-    int _messageLength;
-    int _arrayChunkSize;
-    std::unique_ptr<uint8_t[]> _message;
+    int getTotalLength()
+    {
+        return (sizeof(PartialArrayMessageBuffer) - MESSAGE_CHUNK_SIZE) + this->messageLength;
+    }
 };
+
+// ensure that PartialArrayMessageBuffer is plain old data at compile time
+static_assert(std::is_pod<PartialArrayMessageBuffer>::value, "PartialArrayMessageBuffer is not POD");
 
 
 
@@ -245,14 +226,14 @@ void runServer(VRCarVision* kinect)
 {
     UDPServer server(SERVER_PORT);
     auto client = server.receive();
-    PartialArrayMessageBuffer messageBuffer(MESSAGE_CHUNK_SIZE);
+    PartialArrayMessageBuffer messageBuffer;
 
     for(;;) {
 
         uint8_t* dataEnd = kinect->rgbData() + kinect->rgbDataSize();
         for (uint8_t* messageStart = kinect->rgbData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
             messageBuffer.setMessage(kinect->rgbData(), kinect->rgbDataSize(), messageStart, 'r');
-            server.send(client, messageBuffer.getBytes(), messageBuffer.getBytesLength());
+            server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
         }
 
         sockaddr_storage newClient;
