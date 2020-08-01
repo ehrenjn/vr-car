@@ -8,6 +8,10 @@ IT WOULD BE MORE OOP FOR SEND AND RECEIVE CALLS TO TAKE OR RETURN AN OBJECT THAT
     only bother doing this if you need to know length of message received I guess
 DATA STRUCTURE PADDING IN PartialArrayMessageBuffer MIGHT GET WEIRD IF ARCHETECTURES DONT PLAY WELL TOGETHER, MIGHT WANT TO DO PROPER SERIALIZATION (but thats annoying)
     proper serialization would be close to what I had before realizing I could use POD
+THERES LOTS OF VISUAL GLITCHES RIGHT NOW, PROBABLY NEED SOME KIND OF CHECKSUM
+STREAM SEEMS TO GET LAGGIER WHEN IT'S ON FOR A WHILE???
+FOR SOME REASON THE VERY LAST (BOTTOM) SEGMENT OF DATA IS PICKED UP BY THE CLIENT LESS OFTEN THAN OTHER SEGMENTS?
+FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTEAD OF messageSize THATS SENT IN THE PACKET ITSELF THEN IT GETS AN EXTRA 3 BYTES... BUT ONLY ON THE FINAL SEGMENT
 */
 
 
@@ -184,7 +188,13 @@ private:
 
 
 
-const int MESSAGE_CHUNK_SIZE = 10000;
+namespace DataType {
+    const uint8_t RGB = 'r';
+    const uint8_t DEPTH = 'd';
+}
+
+
+const int MESSAGE_CHUNK_SIZE = 50001; // should be divisable by 3 (for rgb triplets to work)
 
 // needs to be POD in order to be reliably serialized
 struct PartialArrayMessageBuffer
@@ -227,12 +237,13 @@ void runServer(VRCarVision* kinect)
     UDPServer server(SERVER_PORT);
     auto client = server.receive();
     PartialArrayMessageBuffer messageBuffer;
+    std::cout << kinect->depthDataSize() << std::endl;
 
     for(;;) {
 
         uint8_t* dataEnd = kinect->rgbData() + kinect->rgbDataSize();
         for (uint8_t* messageStart = kinect->rgbData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
-            messageBuffer.setMessage(kinect->rgbData(), kinect->rgbDataSize(), messageStart, 'r');
+            messageBuffer.setMessage(kinect->rgbData(), kinect->rgbDataSize(), messageStart, DataType::RGB);
             server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
         }
 
