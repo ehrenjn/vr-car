@@ -75,7 +75,7 @@ class PartialByteArray {
   
   private int readBytesAsUInt32(byte[] array, int firstByte, int numBytes) {
     ByteBuffer bigEndianIntReader = ByteBuffer.wrap(array, firstByte, numBytes).order(ByteOrder.LITTLE_ENDIAN);
-    long extractedLong = bigEndianIntReader.getInt() & 0xFFFFFFFFL; // HACK to get signed int from bytes, then get rid of sign by keeping the same bits but converting to a long 
+    long extractedLong = bigEndianIntReader.getInt() & 0xFFFFFFFFL; // HACK to get signed int from bytes, then get rid of sign by keeping the same bits but converting to a long (CAN'T DO `| 0F` BECAUSE IT GETS OPTIMIZED AWAY BY THE COMPILER)
     return (int)extractedLong;
   }
 }
@@ -135,7 +135,7 @@ void draw() {
   for (int round = 0; round < 7; round++) {
     PartialByteArray data = CLIENT.receive();
     for (int b = data.messageStart; b < data.messageEnd; b += 3) {
-      color newColor = color(data.message[b], data.message[b+1], data.message[b+2]);
+      color newColor = color(data.message[b] & 0xff, data.message[b+1] & 0xff, data.message[b+2] & 0xff); // SAME HACK AS BEFORE to convert bytes which are being interpreted as signed into ints (DOING | 0 WONT WORK IN THIS CASE BECAUSE IT GETS OPTIMIZED OUT)
       int pixelIndex = (data.initialIndex/3) + ((b - data.messageStart)/3);
       pixels[pixelIndex] = newColor;
     }
