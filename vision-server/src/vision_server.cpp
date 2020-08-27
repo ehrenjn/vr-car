@@ -194,7 +194,7 @@ namespace DataType {
 }
 
 
-const int MESSAGE_CHUNK_SIZE = 50001; // should be divisable by 3 (for rgb triplets to work)
+const int MESSAGE_CHUNK_SIZE = 49998; // should be divisable by 6 (rgb triplets must be divisible by 3, 16 bit depth data must be divisible by 2)
 
 // needs to be POD in order to be reliably serialized
 struct PartialArrayMessageBuffer
@@ -244,6 +244,12 @@ void runServer(VRCarVision* kinect)
         uint8_t* dataEnd = kinect->rgbData() + kinect->rgbDataSize();
         for (uint8_t* messageStart = kinect->rgbData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
             messageBuffer.setMessage(kinect->rgbData(), kinect->rgbDataSize(), messageStart, DataType::RGB);
+            server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
+        }
+
+	    dataEnd = kinect->depthData() + kinect->depthDataSize();
+        for (uint8_t* messageStart = kinect->depthData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
+            messageBuffer.setMessage(kinect->depthData(), kinect->depthDataSize(), messageStart, DataType::DEPTH);
             server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
         }
 
