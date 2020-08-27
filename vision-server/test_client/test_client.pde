@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 
+final DataType DISPLAY_DATA_TYPE = DataType.RGB; //Set to DataType.RGB to see RGB data or DataType.DEPTH to see depth data
 final int SERVER_PORT = 6969;
 final String SERVER_IP = "192.168.0.237";
 final int HEADER_SIZE = 12;
@@ -134,10 +135,31 @@ void draw() {
   loadPixels();
   for (int round = 0; round < 7; round++) {
     PartialByteArray data = CLIENT.receive();
-    for (int b = data.messageStart; b < data.messageEnd; b += 3) {
-      color newColor = color(data.message[b], data.message[b+1], data.message[b+2]);
-      int pixelIndex = (data.initialIndex/3) + ((b - data.messageStart)/3);
-      pixels[pixelIndex] = newColor;
+    DataType messageType = DataType.fromByte(data.message[0]);
+    
+    if(messageType == DISPLAY_DATA_TYPE){
+      if ( messageType == DataType.RGB ) {
+        for (int b = data.messageStart; b < data.messageEnd; b += 3) {
+          color newColor = color(
+            data.message[b] & 0xff,
+            data.message[b+1] & 0xff,
+            data.message[b+2] & 0xff);
+          int pixelIndex = (data.initialIndex/3) + ((b - data.messageStart)/3);
+          pixels[pixelIndex] = newColor;
+        }
+      } else if ( messageType == DataType.DEPTH ) {
+        for (int b = data.messageStart; b < data.messageEnd; b += 2) {  
+          int colorIntensity;
+          if(data.message[b+1] == 7){
+            colorIntensity = 0;
+          }else{
+            colorIntensity = ((data.message[b] & 0xff) + (data.message[b+1] << 8) ) >> 2;
+          }
+          color newColor = color(colorIntensity, colorIntensity,  colorIntensity);
+          int pixelIndex = (data.initialIndex/2) + ((b - data.messageStart)/2);
+          pixels[pixelIndex] = newColor;
+        }
+      }
     }
   }
   updatePixels();
