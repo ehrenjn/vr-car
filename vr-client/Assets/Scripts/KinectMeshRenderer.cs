@@ -146,7 +146,6 @@ public class KinectMeshRenderer : MonoBehaviour
         mesh.triangles = meshTrianglesList.ToArray();
         mesh.RecalculateBounds();
         mesh.uv = meshUvs;
-        mesh.Optimize();
 
         texture.Apply();
         meshRenderer.material.SetTexture("_MainTex", texture);
