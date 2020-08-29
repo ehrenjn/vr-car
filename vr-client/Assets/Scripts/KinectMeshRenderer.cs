@@ -79,6 +79,7 @@ public class KinectMeshRenderer : MonoBehaviour
      */
     public void updateVision(Texture2D newTexture, int[] newDepthValues)
     {
+
         texture = newTexture;
 
         /*
@@ -142,15 +143,15 @@ public class KinectMeshRenderer : MonoBehaviour
                 }
             }
         }
-
-        mesh.uv = meshUvs;
         mesh.vertices = meshVertices;
         mesh.triangles = meshTrianglesList.ToArray();
+        mesh.RecalculateBounds();
+        mesh.uv = meshUvs;
+        mesh.Optimize();
 
         texture.Apply();
         meshRenderer.material.SetTexture("_MainTex", texture);
         meshFilter.mesh = mesh;
-        meshFilter.mesh.RecalculateBounds();
     }
 
     void Awake()
