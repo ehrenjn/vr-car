@@ -79,7 +79,6 @@ public class KinectMeshRenderer : MonoBehaviour
      */
     public void updateVision(Texture2D newTexture, int[] newDepthValues)
     {
-
         texture = newTexture;
 
         /*
