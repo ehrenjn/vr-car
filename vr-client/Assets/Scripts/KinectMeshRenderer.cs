@@ -150,6 +150,7 @@ public class KinectMeshRenderer : MonoBehaviour
         texture.Apply();
         meshRenderer.material.SetTexture("_MainTex", texture);
         meshFilter.mesh = mesh;
+        meshFilter.mesh.RecalculateBounds();
     }
 
     void Awake()
