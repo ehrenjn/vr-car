@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using System;
 
-[RequireComponent(typeof(MeshRenderer), typeof(MeshFilter))]
 public class KinectMeshRenderer : MonoBehaviour
 {
     [Tooltip("Width of kinect data. Default: 640")]
@@ -70,6 +69,14 @@ public class KinectMeshRenderer : MonoBehaviour
         return depthValues[index] < 2047 && (
             (index % WIDTH == WIDTH - 1 || Math.Abs(depthValues[index] - depthValues[index + 1]) < edgeSize) &&
             (index / WIDTH == HEIGHT - 1 || Math.Abs(depthValues[index] - depthValues[index + WIDTH]) < edgeSize));
+    }
+
+    /*
+     * Updates the rotation of the kinect mesh
+     */
+    public void updateRotation(float degreesVertical)
+    {
+        Quaternion.Euler(0, -degreesVertical, 0);
     }
 
     /* reposition mesh vertices based on new depth values,
@@ -154,8 +161,8 @@ public class KinectMeshRenderer : MonoBehaviour
 
     void Awake()
     {
-        meshRenderer = GetComponent<MeshRenderer>();
-        meshFilter = GetComponent<MeshFilter>();
+        meshRenderer = transform.GetChild(0).GetComponent<MeshRenderer>();
+        meshFilter = transform.GetChild(0).GetComponent<MeshFilter>();
         if (!shader)
         {
             shader = Shader.Find("Unlit/Transparent Cutout");
@@ -171,16 +178,15 @@ public class KinectMeshRenderer : MonoBehaviour
         int[] meshTriangles = new int[(WIDTH - 1) * (HEIGHT - 1) * 6];
 
         // Create grid of vertices and evenly distributed UV texture points
-        for (int y = 0; y < HEIGHT; y++)
+        for (int i = 0; i < WIDTH*HEIGHT; i++)
         {
-            for (int x = 0; x < WIDTH; x++)
-            {
-                int vIndex = (y * WIDTH) + x;
-                meshUvs[vIndex] = new Vector2(
-                     Math.Max((float)(x) / WIDTH, 0f), // - 22
-                     Math.Min((float)(y) / HEIGHT, 1f) // + 24
-                    );
-            }
+            int x = i % WIDTH;
+            int y = i / WIDTH;
+            meshUvs[i] = new Vector2(
+                Math.Max((float)(x) / WIDTH, 0f), // - 22
+                Math.Min((float)(y) / HEIGHT, 1f) // + 24
+            );
+            meshVertices[i] = new Vector3(0f, 0f, 0f);
         }
 
         // Apply geometry values to mesh
