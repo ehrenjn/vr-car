@@ -6,6 +6,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
+using UnityEngine.Profiling;
 
 public class UDPManager : MonoBehaviour
 {
@@ -114,7 +115,7 @@ public class UDPManager : MonoBehaviour
         while (runThread)
         {
             List<byte[]> dataBuffer = new List<byte[]>();
-            for (int i = 0; i < 32; i++)
+            for (int i = 0; i < 8; i++)
             {
                 dataBuffer.Add(udpClient.Receive(ref RemoteIpEndPoint));
             }
@@ -181,6 +182,8 @@ public class UDPManager : MonoBehaviour
         {
             lock (lockObject)
             {
+                Profiler.BeginSample("Retrieve message data");
+
                 processData = false;
                 foreach (byte[] message in udpData)
                 {
@@ -188,6 +191,8 @@ public class UDPManager : MonoBehaviour
                 }
                 texture.Apply();
                 kinectMeshRenderer.updateVision(texture, depthValues);
+
+                Profiler.EndSample();
             }
         }
     }
