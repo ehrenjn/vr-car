@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using System;
 
-public class PcUserManager : MonoBehaviour
+public class UserManager : MonoBehaviour
 {
 
     public int currentAngle = 0;
