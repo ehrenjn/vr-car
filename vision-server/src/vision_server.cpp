@@ -18,6 +18,7 @@ FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTE
 #include <libfreenect.hpp>
 #include <iostream>
 #include <memory>
+#include <string>
 
 #include <sys/socket.h>
 #include <netinet/in.h> // consts and structs for use with sockets
@@ -66,6 +67,12 @@ public:
     void initializeVideo(freenect_resolution resolution)
     {
         setVideoFormat(FREENECT_VIDEO_RGB, resolution);
+
+        // To do: Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to save bandwidth
+        // Maybe do: Modify libfreenect to support 320x240 QVGA depth resolution like the official SDK
+        //           640x480 has a lot of noise, not very worth the 4x bandwidth usage
+        setDepthFormat(FREENECT_DEPTH_11BIT, resolution); 
+
         _rgbData.reset(new uint8_t[getVideoBufferSize()]);
         _depthData.reset(new uint8_t[getDepthBufferSize()]);
         startVideo();
@@ -193,7 +200,7 @@ namespace DataType {
     const uint8_t DEPTH = 'd';
 }
 
-
+const int MAX_INCOMING_MESSAGE_SIZE = 2; // The size of buffer created for storing an incoming message
 const int MESSAGE_CHUNK_SIZE = 49998; // should be divisable by 6 (rgb triplets must be divisible by 3, 16 bit depth data must be divisible by 2)
 
 // needs to be POD in order to be reliably serialized
@@ -254,12 +261,23 @@ void runServer(VRCarVision* kinect)
         }
 
         sockaddr_storage newClient;
-        uint8_t command = 0;
-        if (server.receiveNonBlocking(&newClient, &command, sizeof(command))) {
-            if (command == 'd')
+        uint8_t message[MAX_INCOMING_MESSAGE_SIZE] = {0};
+        if ( server.receiveNonBlocking(&newClient, (uint8_t*) message, sizeof(message)) )  {
+            uint8_t messageType = message[0];
+            if (messageType == 'd'){
+                std::cout << "Recieved disconnect command.\n";
                 break;
-            else
+            } else if (messageType == 't') {
+                signed char newTilt = (signed char) message[1];
+                std::cout << "Recieved tilt command: " << std::to_string(newTilt) + "\n";
+                kinect->setTiltDegrees((float) newTilt);
+            } else if (messageType == 'c') {
+                std::cout << "Recieved connect command.\n"; 
+                kinect->setTiltDegrees(0);
                 client = newClient;
+            } else {
+                std::cout << "Recieved unknown command: " << std::to_string(messageType) << "\n";
+            }
         }
     }
 }
@@ -277,18 +295,23 @@ int main()
     kinect->setLed(LED_YELLOW);
     while (! kinect->hasVideoData()) {}
     kinect->setLed(LED_GREEN);
-
-    runServer(kinect);
-
-    while (1) {
-        double degrees;
-        std::cout << "degrees to move (enter value >30 to exit): ";
-        std::cin >> degrees;
-        if (degrees > 30) {
-            break;
+	
+    // Temp code: Set to true if you want to manually set the tilt on startup. Otherwise tilt is set to 0 deg
+    if ( 0 ) {
+        while (1) {
+            double degrees;
+            std::cout << "degrees to move (enter value >30 to exit): ";
+            std::cin >> degrees;
+            if (degrees <= 30 && degrees >= -30) {
+                kinect->setTiltDegrees(degrees);
+                break;
+            }
         }
-        kinect->setTiltDegrees(degrees);
+    } else {
+        kinect->setTiltDegrees(0);
     }
+	
+    runServer(kinect);
 
     return 0;
 }

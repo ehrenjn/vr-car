@@ -2,8 +2,16 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System;
+using UnityEngine.Profiling;
+using System.Threading;
 
-[RequireComponent(typeof(MeshRenderer), typeof(MeshFilter))]
+public enum MeshState //The state of async mesh generation
+{
+    HasNewData, // New mesh data that should be applied next frame
+    HasOldData, // No new data (has been applied to renderer already)
+    GeneratingData // Currently generating new mesh data
+}
+
 public class KinectMeshRenderer : MonoBehaviour
 {
     [Tooltip("Width of kinect data. Default: 640")]
@@ -22,22 +30,79 @@ public class KinectMeshRenderer : MonoBehaviour
     MeshRenderer meshRenderer; // This object's MeshRenderer component
     Mesh mesh; // The mesh to be rendered
 
-    Vector3[] meshVertices; // Vertices representing points in space for depth values
-    Vector2[] meshUvs; // UV mapping of texture onto mesh
     Texture2D texture; // Texture of RGB data
+    int mainTextureId; // The ID representing a main texture (used to set new textures to the kinect mesh's material)
+
+    MeshState meshState; //The state of async mesh generation
+    Vector3[] vertices;
+    Vector2[] uvs;
+    int[] triangles;
+
+    public void asyncGenerateMesh(int[] depthValues)
+    {
+        vertices = new Vector3[WIDTH * HEIGHT];
+        uvs = new Vector2[WIDTH * HEIGHT];
+        List<int> trianglesList = new List<int>();
+
+        Profiler.BeginSample("Get vertices");
+        for (int i = 0; i < WIDTH * HEIGHT; i++)
+        {
+            int x = i % WIDTH;
+            int y = i / WIDTH;
+            vertices[i] = depthToWorld(x, y, depthValues[i]);
+        }
+        Profiler.EndSample();
+
+        Profiler.BeginSample("Get uv and triangles");
+        List<int> meshTrianglesList = new List<int>();
+        for (int x = 0; x < WIDTH - 1; x++)
+        {
+            for (int y = 0; y < HEIGHT - 1; y++)
+            {
+                int v1 = x + y * WIDTH;
+                uvs[v1] = new Vector2(
+                    Math.Max(Math.Min((1.07777777777777778f * x - 16.6666666f) / WIDTH, 1f), 0f),
+                    Math.Min((0.9142857142857143f * y + 46.7142857f) / HEIGHT, 1f)  //y - 0.08571428571428572f * y + 46.7142857f
+                );
+
+                int v2 = v1 + 1;
+                int v3 = v1 + WIDTH;
+
+                if (validPoint(v2, depthValues) && validPoint(v3, depthValues))
+                {
+                    int v4 = v3 + 1;
+                    if (validPoint(v1, depthValues))
+                    {
+                        trianglesList.Add(v1);
+                        trianglesList.Add(v3);
+                        trianglesList.Add(v2);
+                    }
+                    if (validPoint(v4, depthValues))
+                    {
+                        trianglesList.Add(v2);
+                        trianglesList.Add(v3);
+                        trianglesList.Add(v4);
+                    }
+                }
+            }
+        }
+        Profiler.EndSample();
+
+        Profiler.BeginSample("convert triangle List");
+        triangles = trianglesList.ToArray();
+        Profiler.EndSample();
+
+        meshState = MeshState.HasNewData;
+    }
 
     /*
-     * Converts a raw kinect depth reading to the depth in meters
-     * Invalid depths return 8m since this is further than the kinect can actually read
-     * (although such vertices should probably never wind up being used by the mesh)
-     */
+    * Converts a raw kinect depth reading to the depth in meters
+    * Invalid depths return 8m since this is further than the kinect can actually read
+    * (although such vertices should probably never wind up being used by the mesh)
+    */
     float rawDepthToMeters(int depthValue)
     {
-        if (depthValue < 2047)
-        {
-            return (float)(1.0 / ((double)(depthValue) * -0.0030711016 + 3.3309495161));
-        }
-        return 8f;
+        return (float)(1.0 / ((double)(depthValue) * -0.0030711016 + 3.3309495161));
     }
 
     /*
@@ -67,95 +132,40 @@ public class KinectMeshRenderer : MonoBehaviour
      */
     bool validPoint(int index, int[] depthValues)
     {
-        return depthValues[index] < 2047 && (
+        return depthValues[index] < 2047;/* && (
             (index % WIDTH == WIDTH - 1 || Math.Abs(depthValues[index] - depthValues[index + 1]) < edgeSize) &&
-            (index / WIDTH == HEIGHT - 1 || Math.Abs(depthValues[index] - depthValues[index + WIDTH]) < edgeSize));
+            (index / WIDTH == HEIGHT - 1 || Math.Abs(depthValues[index] - depthValues[index + WIDTH]) < edgeSize));*/
     }
 
-    /* reposition mesh vertices based on new depth values,
-     * create triangles for valid vertices,
-     * update RGB texture,
-     * update texture UV mapping (eventually this should be dependent on depth for minimal horizontal disparity)
+    /*
+     * Updates the rotation of the kinect mesh
+     */
+    public void updateRotation(float degreesVertical)
+    {
+        Quaternion.Euler(0, -degreesVertical, 0);
+    }
+
+    /* Begin processing vision data in a worker thread
      */
     public void updateVision(Texture2D newTexture, int[] newDepthValues)
     {
-        texture = newTexture;
-
-        /*
-        // Old code for adding a grid on top of texture data
-        for(int j = 0; j < WIDTH; j++)
-        {
-            for(int k = 0; k < HEIGHT; k++)
-            {
-                if( k % 10 == 0 || j % 10 == 0)
-                {
-                    if( k % 100 == 0 || j % 100 == 0)
-                    {
-                        texture.SetPixel(j, k, new Color(0f,0f, 1f ,1f));
-                    }
-                    else
-                    {
-                        texture.SetPixel(j, k, new Color(1f, 1f, 1f, 1f));
-                    }
-                }
-            }
+        if (meshState == MeshState.HasOldData) { // Only accept a new frame if the last one is finished processing. Note: Unity makes sure meshValJobHandle can't be null
+            meshState = MeshState.GeneratingData;
+            Profiler.BeginSample("Begin update vision job");
+            Thread thread = new Thread(() => asyncGenerateMesh(newDepthValues));
+            thread.Start();
+            texture = newTexture; //Prepare texture for application once mesh is ready
+            Profiler.EndSample();
         }
-        */
-
-        List<int> meshTrianglesList = new List<int>();
-        for (int i = 0; i < WIDTH * HEIGHT; i++)
-        {
-            int x = i % WIDTH;
-            int y = i / WIDTH;
-            meshVertices[i] = depthToWorld(x, y, newDepthValues[i]);
-        }
-
-        for (int x = 0; x < WIDTH - 1; x++)
-        {
-            for (int y = 0; y < HEIGHT - 1; y++)
-            {
-                int v1 = x + y * WIDTH;
-                meshUvs[x + y * WIDTH] = new Vector2(
-                    Math.Max(Math.Min((x + 0.07777777777777778f * x - 16.6666666f) / WIDTH, 1f), 0f),
-                    Math.Min((y - 0.08571428571428572f * y + 46.7142857f) / HEIGHT, 1f)
-                );
-
-                int v2 = x + 1 + y * WIDTH;
-                int v3 = x + (y + 1) * WIDTH;
-                int v4 = x + 1 + (y + 1) * WIDTH;
-                if (validPoint(v2, newDepthValues) && validPoint(v3, newDepthValues))
-                {
-                    if (validPoint(v1, newDepthValues))
-                    {
-                        meshTrianglesList.Add(v1);
-                        meshTrianglesList.Add(v3);
-                        meshTrianglesList.Add(v2);
-
-                    }
-                    if (validPoint(v4, newDepthValues))
-                    {
-                        meshTrianglesList.Add(v2);
-                        meshTrianglesList.Add(v3);
-                        meshTrianglesList.Add(v4);
-
-                    }
-                }
-            }
-        }
-        mesh.vertices = meshVertices;
-        mesh.triangles = meshTrianglesList.ToArray();
-        mesh.RecalculateBounds();
-        mesh.uv = meshUvs;
-
-        texture.Apply();
-        meshRenderer.material.SetTexture("_MainTex", texture);
-        meshFilter.mesh = mesh;
+        
     }
 
     void Awake()
     {
-        meshRenderer = GetComponent<MeshRenderer>();
-        meshFilter = GetComponent<MeshFilter>();
+        meshState = MeshState.HasOldData;
+        mainTextureId = Shader.PropertyToID("_MainTex");
+        meshRenderer = transform.GetChild(0).GetComponent<MeshRenderer>();
+        meshFilter = transform.GetChild(0).GetComponent<MeshFilter>();
         if (!shader)
         {
             shader = Shader.Find("Unlit/Transparent Cutout");
@@ -166,36 +176,48 @@ public class KinectMeshRenderer : MonoBehaviour
     void Start()
     {
         // Create mesh's needed arrays
-        meshVertices = new Vector3[WIDTH * HEIGHT];
-        meshUvs = new Vector2[WIDTH * HEIGHT];
-        int[] meshTriangles = new int[(WIDTH - 1) * (HEIGHT - 1) * 6];
+        vertices = new Vector3[WIDTH * HEIGHT];
+        uvs = new Vector2[WIDTH * HEIGHT];
+        triangles = new int[(WIDTH - 1) * (HEIGHT - 1) * 6];
 
         // Create grid of vertices and evenly distributed UV texture points
-        for (int y = 0; y < HEIGHT; y++)
+        for (int i = 0; i < WIDTH*HEIGHT; i++)
         {
-            for (int x = 0; x < WIDTH; x++)
-            {
-                int vIndex = (y * WIDTH) + x;
-                meshUvs[vIndex] = new Vector2(
-                     Math.Max((float)(x) / WIDTH, 0f), // - 22
-                     Math.Min((float)(y) / HEIGHT, 1f) // + 24
-                    );
-            }
+            int x = i % WIDTH;
+            int y = i / WIDTH;
+            uvs[i] = new Vector2(
+                Math.Max((float)(x) / WIDTH, 0f), // - 22
+                Math.Min((float)(y) / HEIGHT, 1f) // + 24
+            );
+            vertices[i] = new Vector3((float)x / WIDTH, (float)y / WIDTH, 10f);
         }
 
         // Apply geometry values to mesh
         mesh = new Mesh();
         mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-        mesh.vertices = meshVertices;
-        mesh.triangles = meshTriangles;
-        mesh.uv = meshUvs;
+        mesh.vertices = vertices;
+        mesh.triangles = triangles;
+        mesh.uv = uvs;
         meshFilter.mesh = mesh;
+        mesh.bounds = new Bounds(new Vector3(0f, 0f, 0f), new Vector3(99f, 99f, 99f));
         meshRenderer.material.shader = shader; // Apply shader to handle transparency
     }
 
     // Update is called once per frame
     void Update()
     {
+        if(meshState == MeshState.HasNewData) // Has recieved data
+        {
+            Profiler.BeginSample("Update kinect mesh renderer");
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
 
+            mesh.uv = uvs;
+            meshRenderer.material.SetTexture(mainTextureId, texture);
+            meshFilter.mesh = mesh;
+
+            meshState = MeshState.HasOldData;
+            Profiler.EndSample();
+        }
     }
 }

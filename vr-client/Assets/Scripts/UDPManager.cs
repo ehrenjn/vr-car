@@ -6,6 +6,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
+using UnityEngine.Profiling;
 
 public class UDPManager : MonoBehaviour
 {
@@ -21,6 +22,13 @@ public class UDPManager : MonoBehaviour
     [Tooltip("The ip of the server. Default: 192.168.1.103")]
     public string serverIp = "192.168.1.103";
 
+    [Tooltip("Angle of the kinect that data is being recieved from. Has to be manually set at the moment. Default: 0f")]
+    public float kinectAngle = 0f;
+
+    [Tooltip("The height of the kinect in meters. Default: 1.75f")]
+    public float kinectHeight = 1.75f;
+
+
     Texture2D texture; // Texture containing newest processed texture data
     int[] depthValues; // Newest depth values
 
@@ -32,7 +40,8 @@ public class UDPManager : MonoBehaviour
     List<byte[]> udpData; // New UDP messages
     const int HEADER_SIZE = 12;
 
-    public KinectMeshRenderer kinectMeshRenderer; // Script for renderering kinect data
+    public GameObject kinectRendererObject; // Prefab to instantiate for rendering kinect data
+    public KinectMeshRenderer kinectMeshRenderer;
 
     /*
      * Updates the mesh or mesh's texture with the packetData array
@@ -90,13 +99,14 @@ public class UDPManager : MonoBehaviour
      * Start UDP client then continuously
      * gather 32 messages for processing at a time (32 messages would equal a full frame of new rgb and depth data if you ignore that a lot get skipped)
      */
+    UdpClient udpClient;
     private void ThreadMethod()
     {
-        UdpClient udpClient = new UdpClient(serverPort);
+        udpClient = new UdpClient(serverPort);
         udpClient.Connect(serverIp, serverPort);
 
         Byte[] sendBytes = Encoding.ASCII.GetBytes("c");
-        udpClient.Send(sendBytes, sendBytes.Length);
+        udpClient.Send(sendBytes, 1);
 
         // Blocks until a message returns on this socket from a remote host
         IPEndPoint RemoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
@@ -105,7 +115,7 @@ public class UDPManager : MonoBehaviour
         while (runThread)
         {
             List<byte[]> dataBuffer = new List<byte[]>();
-            for (int i = 0; i < 32; i++)
+            for (int i = 0; i < 8; i++)
             {
                 dataBuffer.Add(udpClient.Receive(ref RemoteIpEndPoint));
             }
@@ -115,19 +125,15 @@ public class UDPManager : MonoBehaviour
                 processData = true;
             }
         }
+        //processData = false; // Todo: see if uncommenting this line fixes occasional errors on exit
     }
 
-    void Awake()
+    /*
+     * Create a new kinect mesh rendering object that new data will be sent to
+     */
+    public void createNewKinectMesh()
     {
-
-    }
-
-    void Start()
-    {
-        // Initialize mesh vertices
-        depthValues = new int[WIDTH * HEIGHT];
-
-        // Initialize texture
+        kinectMeshRenderer = Instantiate(kinectRendererObject, new Vector3(0, kinectHeight, 0), Quaternion.Euler(kinectAngle, 0f, 0f)).GetComponent<KinectMeshRenderer>();
         texture = new Texture2D(WIDTH, HEIGHT, TextureFormat.RGBA32, false);
         Color invisibleColor = new Color(0f, 0f, 0f, 0f);
         Color[] texturePixels = new Color[WIDTH * HEIGHT];
@@ -137,6 +143,31 @@ public class UDPManager : MonoBehaviour
         }
         texture.SetPixels(texturePixels);
         texture.Apply();
+    }
+
+    /*
+     * Send a message to the kinect server requesting a new tilt angle
+     */
+    public void requestTiltChange(int newTilt)
+    {
+        byte[] messageData = new byte[2] { Encoding.ASCII.GetBytes("t")[0], (byte) newTilt };
+        kinectAngle = 0f-newTilt;
+        createNewKinectMesh();
+        udpClient.Send(messageData, 2);
+    }
+
+    void Awake()
+    {
+       
+    }
+
+    void Start()
+    {
+        // Initialize mesh vertices
+        depthValues = new int[WIDTH * HEIGHT];
+
+        // Initialize texture
+        createNewKinectMesh();
 
         // Start UDP server thread
         udpData = new List<byte[]>();
@@ -151,6 +182,8 @@ public class UDPManager : MonoBehaviour
         {
             lock (lockObject)
             {
+                Profiler.BeginSample("Retrieve message data");
+
                 processData = false;
                 foreach (byte[] message in udpData)
                 {
@@ -158,6 +191,8 @@ public class UDPManager : MonoBehaviour
                 }
                 texture.Apply();
                 kinectMeshRenderer.updateVision(texture, depthValues);
+
+                Profiler.EndSample();
             }
         }
     }
@@ -165,5 +200,6 @@ public class UDPManager : MonoBehaviour
     void OnApplicationQuit()
     {
         runThread = false;
+        // udpClient.Send(Encoding.ASCII.GetBytes("d"), 1); // Note: uncommenting this line will cause you to need to restart the kinect server atm
     }
 }
