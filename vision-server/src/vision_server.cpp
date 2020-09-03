@@ -254,7 +254,7 @@ void runServer(VRCarVision* kinect)
             server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
         }
 
-	    dataEnd = kinect->depthData() + kinect->depthDataSize();
+        dataEnd = kinect->depthData() + kinect->depthDataSize();
         for (uint8_t* messageStart = kinect->depthData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
             messageBuffer.setMessage(kinect->depthData(), kinect->depthDataSize(), messageStart, DataType::DEPTH);
             server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
@@ -295,7 +295,7 @@ int main()
     kinect->setLed(LED_YELLOW);
     while (! kinect->hasVideoData()) {}
     kinect->setLed(LED_GREEN);
-	
+
     // Temp code: Set to true if you want to manually set the tilt on startup. Otherwise tilt is set to 0 deg
     if ( 0 ) {
         while (1) {
@@ -310,7 +310,7 @@ int main()
     } else {
         kinect->setTiltDegrees(0);
     }
-	
+
     runServer(kinect);
 
     return 0;
