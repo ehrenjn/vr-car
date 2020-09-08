@@ -12,6 +12,8 @@ THERES LOTS OF VISUAL GLITCHES RIGHT NOW, PROBABLY NEED SOME KIND OF CHECKSUM
 STREAM SEEMS TO GET LAGGIER WHEN IT'S ON FOR A WHILE???
 FOR SOME REASON THE VERY LAST (BOTTOM) SEGMENT OF DATA IS PICKED UP BY THE CLIENT LESS OFTEN THAN OTHER SEGMENTS?
 FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTEAD OF messageSize THATS SENT IN THE PACKET ITSELF THEN IT GETS AN EXTRA 3 BYTES... BUT ONLY ON THE FINAL SEGMENT
+WHEN RECEIVING COMMANDS KEEP TRACK OF COMMANDS IN A STRUCT AND USE A SWITCH INSTEAD OF IF ELSE 
+    CAN USE SAME CLASS FOR SENDING AND RECEIVING MESSAGES
 */
 
 
@@ -107,13 +109,15 @@ void errIfNegative(const int val, const char* errorMessage)
 
 
 
-class UDPServer 
+class TCPServer 
 {
 public:
 
-    UDPServer(unsigned short port) 
+    TCPServer(unsigned short port) 
     {
-        _server = socket(AF_INET, SOCK_DGRAM, 0); // AF_INET = ipv4, SOCK_DGRAM = datagram socket, 0 = default protocol = UDP (since it's a datagram socket) 
+        _connection = -1; // initialize connection to value that will throw error if send or receive are called before a connection is established
+        
+        _listener = socket(AF_INET, SOCK_STREAM, 0); // AF_INET = ipv4, SOCK_STREAM = stream socket (as opposed to datagram), 0 = default protocol = TCP (since it's a stream socket) 
         errIfNegative(_server, "couldn't create server socket");
 
         // server IP object
@@ -135,7 +139,7 @@ public:
         
         // bind to address
         int result = bind(
-            _server, 
+            _listener, 
             reinterpret_cast<sockaddr*>(&serverAddress), // have to cast server address to more generic sockaddr type (CAN SAFELY USE reinterpret_cast HERE BECAUSE IT'S JUST GOING FROM ONE POINTER TO ANOTHER AND WE'RE PASSING IN THE SIZE OF serverAddress SO IT KNOWS HOW MUCH TO READ)
             sizeof(serverAddress)
         );
@@ -143,140 +147,177 @@ public:
     }
 
 
-    sockaddr_storage receive(uint8_t* messageBuffer = nullptr, int messageBufferLength = 0)
+    void connect_to_client() 
     {
-        sockaddr_storage clientAddress; // sender address will be stored in here when message is received
+        listen(_listener, 0); // 2nd arg is how long the queue of pending connections should be (so that if you're running a server with multiple connections then other people can still try to connect even when you're not calling listen), this server only handles one client at a time so we can set it to 0
+        sockaddr_in clientAddress; // even though we're about to cast this to a sockaddr it actually matters that it starts out as a sockaddr_in because that's how accept() knows that we want an internet address (so we cant just make a raw sockaddr)
         socklen_t clientAddressLength = sizeof(clientAddress); // amazing that socklen_t is its own type
-        int result = recvfrom(
-            _server,
-            messageBuffer, messageBufferLength, // if messageBuffer is null and messageBufferLength is 0 then just sender's address will be received
-            0, // no special flags needed
+        _connection = accept(
+            _listener, 
             reinterpret_cast<sockaddr*>(&clientAddress), 
             &clientAddressLength // for some reason they want a pointer to the size of the address
         );
-        errIfNegative(result, "recvfrom failed");
-        return clientAddress;
+        errIfNegative(_connection, "connecting to client failed");
     }
 
 
-    bool receiveNonBlocking(sockaddr_storage* clientAddress, uint8_t* messageBuffer = nullptr, int messageBufferLength = 0)
+    int _receive(uint8_t* messageBuffer, int messageBufferLength, int flags = 0)
     {
-        socklen_t clientAddressLength = sizeof(sockaddr_storage);
-        int result = recvfrom(
-            _server,
-            messageBuffer, messageBufferLength, // if messageBuffer is null and messageBufferLength is 0 then just sender's address will be received
+        return recv(_connection, messageBuffer, messageBufferLength, flags);
+    }
+
+
+    void receive(uint8_t* messageBuffer, int messageBufferLength)
+    {
+        int result = _receive(messageBuffer, messageBufferLength);
+        errIfNegative(result, "recv failed");
+    }
+
+
+    bool receiveNonBlocking(uint8_t* messageBuffer, int messageBufferLength)
+    {
+        int result = _receive(
+            messageBuffer, messageBufferLength,
             MSG_DONTWAIT, // add special flag to make call nonblocking
-            reinterpret_cast<sockaddr*>(clientAddress), 
-            &clientAddressLength // for some reason they want a pointer to the size of the address
-        );
+        )
+
         if (result < 0 && (errno == EAGAIN  || errno == EWOULDBLOCK)) { // check if a message was received
             return false;
         }
-        errIfNegative(result, "nonblocking recvfrom failed");
+        errIfNegative(result, "nonblocking recv failed");
         return true;
     }
 
 
-    void send(sockaddr_storage& clientAddress, uint8_t* messageStart, int messageLength)
+    void send(uint8_t* messageStart, int messageLength)
     {
-        int result = sendto(
-            _server, messageStart, messageLength, 
-            0, // no special flags
-            reinterpret_cast<sockaddr*>(&clientAddress), 
-            sizeof(clientAddress)
+        int result = send(
+            _connection, messageStart, messageLength, 
+            0 // no special flags
         );
-        errIfNegative(result, "sendto failed");
+        errIfNegative(result, "send failed");
     }
 
 
 private:
-    int _server; // file descriptor for the server's socket object
+    int _listener; // file descriptor for the server's socket object
+    int _connection; // file descriptor for the connected socket object (only 1 because only 1 client)
 };
 
 
 
 namespace DataType {
+    // DataTypes for outgoing messages
     const uint8_t RGB = 'r';
     const uint8_t DEPTH = 'd';
+
+    // DataTypes for incoming messages
+    const uint8_t DISCONNECT = 'd';
+    const uint8_t TILT = 't';
+    const uint8_t STOP_SERVER = 's';
 }
 
-const int MAX_INCOMING_MESSAGE_SIZE = 2; // The size of buffer created for storing an incoming message
-const int MESSAGE_CHUNK_SIZE = 49998; // should be divisable by 6 (rgb triplets must be divisible by 3, 16 bit depth data must be divisible by 2)
 
-// needs to be POD in order to be reliably serialized
-struct PartialArrayMessageBuffer
+// these should be set to bigger numbers than we actually need because they need to take the amount of metadata in a Message object into account and that's prone to changing
+const int MAX_INCOMING_MESSAGE_SIZE = 100; // The size of buffer to use for storing an incoming message
+const int MAX_OUTGOING_MESSAGE_SIZE = ;
+
+
+// not using a POD because then serialization wouldn't be architecture agnostic
+class Message 
 {
-    uint8_t dataType;
-    uint32_t initialIndex;
-    uint32_t messageLength;
-    uint8_t message[MESSAGE_CHUNK_SIZE];
+public:
 
-    void setMessage(uint8_t* array, int arraySize, uint8_t* startAddress, uint8_t dataType)
-    {
-        // calculate final address in array for copying
-        uint8_t* arrayEnd = array + arraySize;
-        uint8_t* finalAddress;
-        if ((startAddress + MESSAGE_CHUNK_SIZE) < arrayEnd)
-            finalAddress = startAddress + MESSAGE_CHUNK_SIZE;
-        else
-            finalAddress = arrayEnd;
-        
-        // update data
-        std::copy(startAddress, finalAddress, this->message);
-        this->dataType = dataType;
-        this->initialIndex = startAddress - array;
-        this->messageLength = finalAddress - startAddress;
+    // creates an empty message using the specified backing array
+    static Message createEmptyMessage(uint8_t* backingArray) {
+        return Message(backingArray);
     }
 
-    int getTotalLength()
-    {
-        return (sizeof(PartialArrayMessageBuffer) - MESSAGE_CHUNK_SIZE) + this->messageLength;
-    }
-};
+    // creates a new Message by wrapping a byte array from an already serialized Message
+    static Message deserialize(uint8_t* rawData) {
+        Message message(rawData);
 
-// ensure that PartialArrayMessageBuffer is plain old data at compile time
-static_assert(std::is_pod<PartialArrayMessageBuffer>::value, "PartialArrayMessageBuffer is not POD");
+        // update metadata
+        uint8_t* nextAddress = message._rawBytes;
+        message._messageType = *nextAddress;
+        nextAddress += sizeof(_messageType);
+        message._rawBytesLength = *reinterpret_cast<uint32_t*>(nextAddress);
+
+        return message;
+    }
+
+    void setData(uint8_t messageType, uint8_t* messageContents, uint32_t dataLength) {
+        uint8_t* nextAddress = _rawBytes;
+
+        _messageType = messageType;
+        *nextAddress = _messageType;
+        nextAddress += sizeof(_messageType);
+
+        _rawBytesLength = dataLength + _totalMetaDataSize;
+        *nextAddress = *reinterpret_cast<uint32_t*>(_rawBytesLength);
+        nextAddress += sizeof(_rawBytesLength);
+
+        std::copy(nextAddress, nextAddress + dataLength, messageContents);
+    }
+
+    uint8_t* getSerialized() { return _rawBytes; }
+    uint8_t* getStartOfData() { return _rawBytes + _totalMetaDataSize; }
+    uint32_t getSerializedLength() { return _rawBytesLength; }
+    uint8_t getMessageType() { return _messageType; }
+
+private:
+    uint8_t _messageType;
+    uint8_t* _rawBytes;
+    uint32_t _rawBytesLength;
+    static const uint32_t _totalMetaDataSize = sizeof(_messageType) + sizeof(_rawBytesLength);
+
+    Message(uint8_t* backingArray) {
+        _rawBytes = backingArray;
+    }
+}
 
 
 
 void runServer(VRCarVision* kinect) 
 {
-    UDPServer server(SERVER_PORT);
-    auto client = server.receive();
-    PartialArrayMessageBuffer messageBuffer;
-    std::cout << kinect->depthDataSize() << std::endl;
+    TCPServer server(SERVER_PORT);
+    server.connect_to_client();
 
-    for(;;) {
+    uint8_t outgoingMessageBackingArray[MAX_OUTGOING_MESSAGE_SIZE];
+    Message messageBuffer = Message.createEmptyMessage(outgoingMessageBackingArray);
+    
+    bool serverRunning = true;
+    while (serverRunning) {
 
-        uint8_t* dataEnd = kinect->rgbData() + kinect->rgbDataSize();
-        for (uint8_t* messageStart = kinect->rgbData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
-            messageBuffer.setMessage(kinect->rgbData(), kinect->rgbDataSize(), messageStart, DataType::RGB);
-            server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
-        }
+        messageBuffer.setData(DataType::RGB, kinect->rgbData(), kinect->rgbDataSize());
+        server.send(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
 
-        dataEnd = kinect->depthData() + kinect->depthDataSize();
-        for (uint8_t* messageStart = kinect->depthData(); messageStart < dataEnd; messageStart += MESSAGE_CHUNK_SIZE) {
-            messageBuffer.setMessage(kinect->depthData(), kinect->depthDataSize(), messageStart, DataType::DEPTH);
-            server.send(client, reinterpret_cast<uint8_t*>(&messageBuffer), messageBuffer.getTotalLength());
-        }
+        messageBuffer.setData(DataType::DEPTH, kinect->depthData(), kinect->depthDataSize());
+        server.send(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
 
-        sockaddr_storage newClient;
-        uint8_t message[MAX_INCOMING_MESSAGE_SIZE] = {0};
-        if ( server.receiveNonBlocking(&newClient, (uint8_t*) message, sizeof(message)) )  {
-            uint8_t messageType = message[0];
-            if (messageType == 'd'){
-                std::cout << "Recieved disconnect command.\n";
-                break;
-            } else if (messageType == 't') {
-                signed char newTilt = (signed char) message[1];
-                std::cout << "Recieved tilt command: " << std::to_string(newTilt) + "\n";
-                kinect->setTiltDegrees((float) newTilt);
-            } else if (messageType == 'c') {
-                std::cout << "Recieved connect command.\n"; 
-                kinect->setTiltDegrees(0);
-                client = newClient;
-            } else {
-                std::cout << "Recieved unknown command: " << std::to_string(messageType) << "\n";
+        uint8_t message[MAX_INCOMING_MESSAGE_SIZE];
+        bool messageReceived = server.receiveNonBlocking((uint8_t*) message, sizeof(message));
+        if (messageReceived) {
+            Message receivedMessage = Message.deserialize(message);
+            switch (receivedMessage.getMessageType()) {
+                case DataType.DISCONNECT:
+                    std::cout << "Recieved disconnect command. waiting for new client..." << std::endl;
+                    server.connect_to_client(); // wait for new client
+                    kinect->setTiltDegrees(0);
+                    std::cout << "new client connected" << std::endl;
+                    break;
+                case DataType.TILT:
+                    signed char newTilt = *std::static_cast<(signed char)*>(message.getStartOfData());
+                    std::cout << "Recieved tilt command: " << std::to_string(newTilt) << std::endl;
+                    kinect->setTiltDegrees((float) newTilt);
+                    break;
+                case DataType.STOP_SERVER:
+                    std::cout << "Recieved stop server command." << std::endl;
+                    serverRunning = false;
+                    break;
+                case default:
+                    std::cout << "Recieved unknown command: " << std::to_string(messageType) << std::endl;
+                    break;
             }
         }
     }
