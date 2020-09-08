@@ -6,14 +6,13 @@ WHAT IF THE SERVER IS SENDING DATA TOO FAST? IS THAT POSSIBLE?
         these systems aren't "supposed" to receive every bit of video... so missing bits becuase we're too slow actually makes sense
 IT WOULD BE MORE OOP FOR SEND AND RECEIVE CALLS TO TAKE OR RETURN AN OBJECT THAT CONTAINS AN ADDRESS AND POINTER TO DATA, BUT MIGHT BE A MESS, IDK
     only bother doing this if you need to know length of message received I guess
-DATA STRUCTURE PADDING IN PartialArrayMessageBuffer MIGHT GET WEIRD IF ARCHETECTURES DONT PLAY WELL TOGETHER, MIGHT WANT TO DO PROPER SERIALIZATION (but thats annoying)
-    proper serialization would be close to what I had before realizing I could use POD
 THERES LOTS OF VISUAL GLITCHES RIGHT NOW, PROBABLY NEED SOME KIND OF CHECKSUM
 STREAM SEEMS TO GET LAGGIER WHEN IT'S ON FOR A WHILE???
 FOR SOME REASON THE VERY LAST (BOTTOM) SEGMENT OF DATA IS PICKED UP BY THE CLIENT LESS OFTEN THAN OTHER SEGMENTS?
 FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTEAD OF messageSize THATS SENT IN THE PACKET ITSELF THEN IT GETS AN EXTRA 3 BYTES... BUT ONLY ON THE FINAL SEGMENT
-WHEN RECEIVING COMMANDS KEEP TRACK OF COMMANDS IN A STRUCT AND USE A SWITCH INSTEAD OF IF ELSE 
-    CAN USE SAME CLASS FOR SENDING AND RECEIVING MESSAGES
+Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to save bandwidth
+    Maybe do: Modify libfreenect to support 320x240 QVGA depth resolution like the official SDK
+    640x480 has a lot of noise, not very worth the 4x bandwidth usage
 */
 
 
@@ -69,10 +68,6 @@ public:
     void initializeVideo(freenect_resolution resolution)
     {
         setVideoFormat(FREENECT_VIDEO_RGB, resolution);
-
-        // To do: Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to save bandwidth
-        // Maybe do: Modify libfreenect to support 320x240 QVGA depth resolution like the official SDK
-        //           640x480 has a lot of noise, not very worth the 4x bandwidth usage
         setDepthFormat(FREENECT_DEPTH_11BIT, resolution); 
 
         _rgbData.reset(new uint8_t[getVideoBufferSize()]);
@@ -118,7 +113,7 @@ public:
         _connection = -1; // initialize connection to value that will throw error if send or receive are called before a connection is established
         
         _listener = socket(AF_INET, SOCK_STREAM, 0); // AF_INET = ipv4, SOCK_STREAM = stream socket (as opposed to datagram), 0 = default protocol = TCP (since it's a stream socket) 
-        errIfNegative(_server, "couldn't create server socket");
+        errIfNegative(_listener, "couldn't create server socket");
 
         // server IP object
         in_addr serverIp; // in_addr is a struct with few members but the only one we need to set is IP
@@ -178,8 +173,8 @@ public:
     {
         int result = _receive(
             messageBuffer, messageBufferLength,
-            MSG_DONTWAIT, // add special flag to make call nonblocking
-        )
+            MSG_DONTWAIT // add special flag to make call nonblocking
+        );
 
         if (result < 0 && (errno == EAGAIN  || errno == EWOULDBLOCK)) { // check if a message was received
             return false;
@@ -189,7 +184,7 @@ public:
     }
 
 
-    void send(uint8_t* messageStart, int messageLength)
+    void sendMsg(uint8_t* messageStart, int messageLength)
     {
         int result = send(
             _connection, messageStart, messageLength, 
@@ -220,7 +215,7 @@ namespace DataType {
 
 // these should be set to bigger numbers than we actually need because they need to take the amount of metadata in a Message object into account and that's prone to changing
 const int MAX_INCOMING_MESSAGE_SIZE = 100; // The size of buffer to use for storing an incoming message
-const int MAX_OUTGOING_MESSAGE_SIZE = ;
+const int MAX_OUTGOING_MESSAGE_SIZE = 1000000;
 
 
 // not using a POD because then serialization wouldn't be architecture agnostic
@@ -274,7 +269,7 @@ private:
     Message(uint8_t* backingArray) {
         _rawBytes = backingArray;
     }
-}
+};
 
 
 
@@ -284,38 +279,41 @@ void runServer(VRCarVision* kinect)
     server.connect_to_client();
 
     uint8_t outgoingMessageBackingArray[MAX_OUTGOING_MESSAGE_SIZE];
-    Message messageBuffer = Message.createEmptyMessage(outgoingMessageBackingArray);
+    Message messageBuffer = Message::createEmptyMessage(outgoingMessageBackingArray);
     
     bool serverRunning = true;
     while (serverRunning) {
 
         messageBuffer.setData(DataType::RGB, kinect->rgbData(), kinect->rgbDataSize());
-        server.send(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
+        server.sendMsg(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
 
         messageBuffer.setData(DataType::DEPTH, kinect->depthData(), kinect->depthDataSize());
-        server.send(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
+        server.sendMsg(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
 
         uint8_t message[MAX_INCOMING_MESSAGE_SIZE];
         bool messageReceived = server.receiveNonBlocking((uint8_t*) message, sizeof(message));
         if (messageReceived) {
-            Message receivedMessage = Message.deserialize(message);
-            switch (receivedMessage.getMessageType()) {
-                case DataType.DISCONNECT:
+            Message receivedMessage = Message::deserialize(message);
+            uint8_t messageType = receivedMessage.getMessageType();
+            switch (messageType) {
+                case DataType::DISCONNECT:
                     std::cout << "Recieved disconnect command. waiting for new client..." << std::endl;
                     server.connect_to_client(); // wait for new client
                     kinect->setTiltDegrees(0);
                     std::cout << "new client connected" << std::endl;
                     break;
-                case DataType.TILT:
-                    signed char newTilt = *std::static_cast<(signed char)*>(message.getStartOfData());
+                case DataType::TILT: { // needs to be in its own scope or else the compiler will complain about the fact that we're initializing new variables which will still be accessible from other switch cases but will be initialized to garbage
+                    uint8_t* tiltDataAddress = receivedMessage.getStartOfData();
+                    signed char newTilt = *reinterpret_cast<signed char*>(tiltDataAddress);
                     std::cout << "Recieved tilt command: " << std::to_string(newTilt) << std::endl;
-                    kinect->setTiltDegrees((float) newTilt);
+                    kinect->setTiltDegrees(newTilt);
                     break;
-                case DataType.STOP_SERVER:
+                }
+                case DataType::STOP_SERVER:
                     std::cout << "Recieved stop server command." << std::endl;
                     serverRunning = false;
                     break;
-                case default:
+                default:
                     std::cout << "Recieved unknown command: " << std::to_string(messageType) << std::endl;
                     break;
             }
