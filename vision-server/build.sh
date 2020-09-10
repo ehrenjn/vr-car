@@ -8,6 +8,10 @@ if [ "${2}" == "run" ]; then
     echo -e "\nexecuting..."
     ssh -i ~/.ssh/pi_vr_car_key pi@${1} "cd ~/vr-car/vision-server/src/ && make run"
 
+elif [ "${2}" == "kill" ]; then
+    echo -e "\nkilling server..."
+    ssh -i ~/.ssh/pi_vr_car_key pi@${1} "cd ~/vr-car/vision-server/src/ && make kill"
+
 else
     echo -e "\nuploading..."
     ssh -i ~/.ssh/pi_vr_car_key pi@${1} "rm -rf ~/vr-car/vision-server && mkdir ~/vr-car/vision-server"

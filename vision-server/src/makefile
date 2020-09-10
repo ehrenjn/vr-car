@@ -3,3 +3,6 @@ build:
 
 run:
 	./vision_server
+
+kill:
+	/bin/bash ./kill_server.sh

@@ -214,8 +214,8 @@ namespace DataType {
 
 
 // these should be set to bigger numbers than we actually need because they need to take the amount of metadata in a Message object into account and that's prone to changing
-const int MAX_INCOMING_MESSAGE_SIZE = 100; // The size of buffer to use for storing an incoming message
-const int MAX_OUTGOING_MESSAGE_SIZE = 1000000;
+const uint32_t MAX_INCOMING_MESSAGE_SIZE = 100; // The size of buffer to use for storing an incoming message
+const uint32_t MAX_OUTGOING_MESSAGE_SIZE = 1000000;
 
 
 // not using a POD because then serialization wouldn't be architecture agnostic
@@ -249,10 +249,10 @@ public:
         nextAddress += sizeof(_messageType);
 
         _rawBytesLength = dataLength + _totalMetaDataSize;
-        *nextAddress = *reinterpret_cast<uint32_t*>(_rawBytesLength);
+        *reinterpret_cast<uint32_t*>(nextAddress) = _rawBytesLength;
         nextAddress += sizeof(_rawBytesLength);
 
-        std::copy(nextAddress, nextAddress + dataLength, messageContents);
+        std::copy(messageContents, messageContents + dataLength, nextAddress);
     }
 
     uint8_t* getSerialized() { return _rawBytes; }
@@ -275,6 +275,9 @@ private:
 
 void runServer(VRCarVision* kinect) 
 {
+    std::cout << kinect->rgbDataSize() << std::endl;
+    std::cout << kinect->depthDataSize() << std::endl;
+
     TCPServer server(SERVER_PORT);
     server.connect_to_client();
 
