@@ -13,6 +13,7 @@ FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTE
 Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to save bandwidth
     Maybe do: Modify libfreenect to support 320x240 QVGA depth resolution like the official SDK
     640x480 has a lot of noise, not very worth the 4x bandwidth usage
+CAN GET RESPONSES BY USING A 2ND TCPServer object
 */
 
 
@@ -22,6 +23,7 @@ Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to
 #include <string>
 
 #include <sys/socket.h>
+#include <unistd.h> // defines close function (for all file descriptors)
 #include <netinet/in.h> // consts and structs for use with sockets
 #include <errno.h> // to get error numbers after system call errors
 
@@ -144,7 +146,10 @@ public:
 
     void connect_to_client() 
     {
-        listen(_listener, 0); // 2nd arg is how long the queue of pending connections should be (so that if you're running a server with multiple connections then other people can still try to connect even when you're not calling listen), this server only handles one client at a time so we can set it to 0
+        close_connection(); // close current _connection if it's connected to anything
+        int result = listen(_listener, 0); // 2nd arg is how long the queue of pending connections should be (so that if you're running a server with multiple connections then other people can still try to connect even when you're not calling listen), this server only handles one client at a time so we can set it to 0
+        errIfNegative(result, "couldn't listen for new connection");
+
         sockaddr_in clientAddress; // even though we're about to cast this to a sockaddr it actually matters that it starts out as a sockaddr_in because that's how accept() knows that we want an internet address (so we cant just make a raw sockaddr)
         socklen_t clientAddressLength = sizeof(clientAddress); // amazing that socklen_t is its own type
         _connection = accept(
@@ -186,17 +191,40 @@ public:
 
     void sendMsg(uint8_t* messageStart, int messageLength)
     {
-        int result = send(
-            _connection, messageStart, messageLength, 
-            0 // no special flags
-        );
-        errIfNegative(result, "send failed");
+        int amountSentLastSend = 0;
+
+        // need to call send multiple times because send will not send the whole message all at once if the message is too large
+        for (int totalAmountSent = 0; totalAmountSent < messageLength; totalAmountSent += amountSentLastSend) {
+            amountSentLastSend = send(
+                _connection, 
+                messageStart + totalAmountSent, // if the whole message isn't sent in the send() then we issue another that's only trying to send the rest of the message
+                messageLength - totalAmountSent, 
+                0 // no special flags
+            );
+            errIfNegative(amountSentLastSend, "send failed");
+        }
+    }
+
+    
+    void stop() 
+    {
+        close_connection();
+        errIfNegative(close(_listener), "closing _listener failed");
     }
 
 
 private:
     int _listener; // file descriptor for the server's socket object
     int _connection; // file descriptor for the connected socket object (only 1 because only 1 client)
+
+
+    void close_connection()
+    {
+        if (_connection >= 0) { // only close _connection if it's currently connected to something
+            int result = close(_connection);
+            errIfNegative(result, "closing _connection failed");
+        }
+    }
 };
 
 
@@ -272,6 +300,39 @@ private:
 };
 
 
+/*
+bool handleResponse()
+{
+    uint8_t message[MAX_INCOMING_MESSAGE_SIZE];
+    server.receive(message, sizeof(message));
+    Message receivedMessage = Message::deserialize(message);
+    uint8_t messageType = receivedMessage.getMessageType();
+
+    switch (messageType) {
+        case DataType::DISCONNECT:
+            std::cout << "Recieved disconnect command. waiting for new client..." << std::endl;
+            server.connect_to_client(); // wait for new client
+            kinect->setTiltDegrees(0);
+            std::cout << "new client connected" << std::endl;
+            break;
+        case DataType::TILT: { // needs to be in its own scope or else the compiler will complain about the fact that we're initializing new variables which will still be accessible from other switch cases but will be initialized to garbage
+            uint8_t* tiltDataAddress = receivedMessage.getStartOfData();
+            signed char newTilt = *reinterpret_cast<signed char*>(tiltDataAddress);
+            std::cout << "Recieved tilt command: " << std::to_string(newTilt) << std::endl;
+            kinect->setTiltDegrees(newTilt);
+            break;
+        }
+        case DataType::STOP_SERVER:
+            std::cout << "Recieved stop server command." << std::endl;
+            serverRunning = false;
+            break;
+        default:
+            std::cout << "Recieved unknown command: " << std::to_string(messageType) << std::endl;
+            break;
+    }
+}
+*/
+
 
 void runServer(VRCarVision* kinect) 
 {
@@ -292,36 +353,9 @@ void runServer(VRCarVision* kinect)
 
         messageBuffer.setData(DataType::DEPTH, kinect->depthData(), kinect->depthDataSize());
         server.sendMsg(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
-
-        uint8_t message[MAX_INCOMING_MESSAGE_SIZE];
-        bool messageReceived = server.receiveNonBlocking((uint8_t*) message, sizeof(message));
-        if (messageReceived) {
-            Message receivedMessage = Message::deserialize(message);
-            uint8_t messageType = receivedMessage.getMessageType();
-            switch (messageType) {
-                case DataType::DISCONNECT:
-                    std::cout << "Recieved disconnect command. waiting for new client..." << std::endl;
-                    server.connect_to_client(); // wait for new client
-                    kinect->setTiltDegrees(0);
-                    std::cout << "new client connected" << std::endl;
-                    break;
-                case DataType::TILT: { // needs to be in its own scope or else the compiler will complain about the fact that we're initializing new variables which will still be accessible from other switch cases but will be initialized to garbage
-                    uint8_t* tiltDataAddress = receivedMessage.getStartOfData();
-                    signed char newTilt = *reinterpret_cast<signed char*>(tiltDataAddress);
-                    std::cout << "Recieved tilt command: " << std::to_string(newTilt) << std::endl;
-                    kinect->setTiltDegrees(newTilt);
-                    break;
-                }
-                case DataType::STOP_SERVER:
-                    std::cout << "Recieved stop server command." << std::endl;
-                    serverRunning = false;
-                    break;
-                default:
-                    std::cout << "Recieved unknown command: " << std::to_string(messageType) << std::endl;
-                    break;
-            }
-        }
     }
+
+    server.stop();
 }
 
 
