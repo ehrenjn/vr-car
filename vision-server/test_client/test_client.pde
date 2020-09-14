@@ -6,7 +6,8 @@ import java.io.DataInputStream;
 
 
 final DataType DISPLAY_DATA_TYPE = DataType.RGB; //Set to DataType.RGB to see RGB data or DataType.DEPTH to see depth data
-final int SERVER_PORT = 6969;
+final int SERVER_OUTPUT_PORT = 6969;
+final int SERVER_INPUT_PORT = 7878;
 final String SERVER_IP = "192.168.0.237";
 
 
@@ -22,8 +23,7 @@ static void error(String e) {
 
 
 public enum DataType {
-  DEPTH,
-  RGB;
+  DEPTH, RGB, DISCONNECT, TILT, STOP_SERVER, UNKNOWN;
   
   public static DataType fromByte(byte b) {
     switch (b) {
@@ -35,22 +35,20 @@ public enum DataType {
     error("Couldn't convert byte: " + b);
     return null;
   }
-}
-
-
-public enum Request {
-  DISCONNECT,
-  CONNECT;
   
-  public String toString() {
+  public Byte toByte() {
     switch (this) {
-    case CONNECT:
-      return "c";
-    case DISCONNECT:
-      return "d";
-    }
+      case DISCONNECT:
+        return 'd';
+      case TILT:
+        return 't';
+      case STOP_SERVER:
+        return 's';
+      case UNKNOWN:
+        return 'u';
+      }
     error("Can't convert Request to Character");
-    return null;
+    return null; // unreachable
   }
 }
 
@@ -65,17 +63,26 @@ class Message {
     this.dataType = dataType;
     this.data = data;
   }
+  
+  public byte[] serializeHeader() {
+    ByteBuffer header = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
+    header.put(dataType.toByte());
+    header.putInt(1, data.length + HEADER_SIZE);
+    return header.array();
+  }
 }
 
 
 class TCPClient {
   private Socket socket;
   private DataInputStream socketReader;
+  private OutputStream socketWriter;
  
   public TCPClient(String serverAddress, int serverPort) {
     try {
       this.socket = new Socket(serverAddress, serverPort);
       this.socketReader = new DataInputStream(this.socket.getInputStream()); // need to wrap in a DataInputStream so that we get the readFully() function (plain InputStream's read(n) function reads a MAXIMUM of n bytes, readFully always reads n bytes
+      this.socketWriter = this.socket.getOutputStream();
     } catch(Exception e) { error(e); }
   }
   
@@ -94,6 +101,17 @@ class TCPClient {
     } catch (IOException e) { error(e); }
     return bytes;
   }
+  
+  public void send(Message message) {
+    sendBytes(message.serializeHeader());
+    sendBytes(message.data);
+  }
+  
+  public void sendBytes(byte[] bytes) {
+    try {
+      socketWriter.write(bytes);
+    } catch (IOException e) { error(e); }
+  }
  
   public void close() {
     try {
@@ -109,11 +127,13 @@ class TCPClient {
 }
 
 
-TCPClient CLIENT;
+TCPClient RECEIVER;
+TCPClient SENDER;
 
 
 void setup() {
-  CLIENT = new TCPClient(SERVER_IP, SERVER_PORT);
+  RECEIVER = new TCPClient(SERVER_IP, SERVER_OUTPUT_PORT);
+  SENDER = new TCPClient(SERVER_IP, SERVER_INPUT_PORT);
   size(640, 480);
 }
 
@@ -147,7 +167,7 @@ void display_depth(byte[] data) {
 
 
 void draw() {
-  Message frame = CLIENT.receive();
+  Message frame = RECEIVER.receive();
   if (frame.dataType == DISPLAY_DATA_TYPE) {
     loadPixels();
     if (frame.dataType == DataType.RGB ) {
@@ -156,5 +176,33 @@ void draw() {
       display_depth(frame.data);
     }
     updatePixels();
+  }
+}
+
+
+int CURRENT_ANGLE = 0;
+
+void keyPressed() {
+  if (keyCode == UP || keyCode == DOWN) {
+    
+    int newAngle = CURRENT_ANGLE;
+    switch (keyCode) {
+      case UP:
+        newAngle = min(CURRENT_ANGLE + 5, 30);
+        break;
+      case DOWN:
+        newAngle = max(CURRENT_ANGLE - 5, -30);
+        break;
+    }
+  
+    if (newAngle != CURRENT_ANGLE) {
+      print(newAngle);
+      SENDER.send(new Message(DataType.TILT, new byte[]{(byte)newAngle}));
+      CURRENT_ANGLE = newAngle;
+    }
+  }
+  
+  else if (key == 's') {
+    SENDER.send(new Message(DataType.STOP_SERVER, new byte[]{}));
   }
 }

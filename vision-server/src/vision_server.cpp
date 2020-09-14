@@ -13,7 +13,9 @@ FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTE
 Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to save bandwidth
     Maybe do: Modify libfreenect to support 320x240 QVGA depth resolution like the official SDK
     640x480 has a lot of noise, not very worth the 4x bandwidth usage
-CAN GET RESPONSES BY USING A 2ND TCPServer object
+CAN MAKE EVERYTHING MORE EFFICIENT BY HAVING A COMPLETELY SEPERATE BYTE ARRAY FOR HEADER AND DATA IN THE Message CLASS
+    CAN DO THIS NOW BECAUSE TCP IS STREAM BASED
+    might not be worth it because the copying doesn't seem to be wasting too much time... but it is kinda dumb so it'd be nice to avoid
 */
 
 
@@ -29,7 +31,9 @@ CAN GET RESPONSES BY USING A 2ND TCPServer object
 
 
 const freenect_resolution RESOLUTION = FREENECT_RESOLUTION_MEDIUM;
-const unsigned short SERVER_PORT = 6969;
+const unsigned short SEND_PORT = 6969;
+const unsigned short RECEIVE_PORT = 7878;
+
 
 
 class VRCarVision : public Freenect::FreenectDevice 
@@ -93,6 +97,92 @@ private:
     std::unique_ptr<uint8_t[]> _depthData;
 };
 
+
+
+namespace DataType {
+    // DataTypes for outgoing messages
+    const uint8_t RGB = 'r';
+    const uint8_t DEPTH = 'd';
+
+    // DataTypes for incoming messages
+    const uint8_t DISCONNECT = 'd';
+    const uint8_t TILT = 't';
+    const uint8_t STOP_SERVER = 's';
+}
+
+
+// these should be set to bigger numbers than we actually need because they need to take the amount of metadata in a Message object into account and that's prone to changing
+const uint32_t MAX_INCOMING_MESSAGE_SIZE = 100; // The size of buffer to use for storing an incoming message
+const uint32_t MAX_OUTGOING_MESSAGE_SIZE = 1000000;
+
+
+// not using a POD because then serialization wouldn't be architecture agnostic
+class Message 
+{
+private:
+    uint8_t _messageType;
+    uint8_t* _rawBytes;
+    uint32_t _rawBytesLength;
+
+    Message(uint8_t* backingArray) {
+        _rawBytes = backingArray;
+    }
+
+public:
+
+    // creates an empty message using the specified backing array
+    static Message createEmptyMessage(uint8_t* backingArray) {
+        return Message(backingArray);
+    }
+
+    // creates a new Message by wrapping a byte array from an already serialized Message
+    static Message deserialize(uint8_t* rawData) {
+        Message message(rawData);
+
+        // update metadata
+        uint8_t* nextAddress = message._rawBytes;
+        message._messageType = *nextAddress;
+        nextAddress += sizeof(_messageType);
+        message._rawBytesLength = *reinterpret_cast<uint32_t*>(nextAddress);
+
+        return message;
+    }
+
+    void setData(uint8_t messageType, uint8_t* messageContents, uint32_t dataLength) {
+        uint8_t* nextAddress = _rawBytes;
+
+        _messageType = messageType;
+        *nextAddress = _messageType;
+        nextAddress += sizeof(_messageType);
+
+        _rawBytesLength = dataLength + headerSize;
+        *reinterpret_cast<uint32_t*>(nextAddress) = _rawBytesLength;
+        nextAddress += sizeof(_rawBytesLength);
+
+        std::copy(messageContents, messageContents + dataLength, nextAddress);
+    }
+
+    uint8_t* getSerialized() { return _rawBytes; }
+    uint8_t* getStartOfData() { return _rawBytes + headerSize; }
+    uint32_t getSerializedLength() { return _rawBytesLength; }
+    uint32_t getDataLength() { return _rawBytesLength - headerSize; }
+    uint8_t getMessageType() { return _messageType; }
+
+    static const uint32_t headerSize = sizeof(_messageType) + sizeof(_rawBytesLength);
+};
+
+
+void printArray(uint8_t* array, uint32_t length)
+{
+    std::cout << "[";
+    for (uint32_t i = 0; i < length; i++) {
+        std::cout << (int) array[i];
+        if (i != length - 1) {
+            std::cout << ", ";
+        }
+    }
+    std::cout << "]" << std::endl;
+}
 
 
 void errIfNegative(const int val, const char* errorMessage) 
@@ -161,35 +251,48 @@ public:
     }
 
 
-    int _receive(uint8_t* messageBuffer, int messageBufferLength, int flags = 0)
+    void receive(uint8_t* messageBuffer, int numBytes)
     {
-        return recv(_connection, messageBuffer, messageBufferLength, flags);
+        int amountAcquiredLastRecv = 0;
+
+        for (int totalBytesReceived = 0; totalBytesReceived < numBytes; totalBytesReceived += amountAcquiredLastRecv) {
+            amountAcquiredLastRecv = _receive(
+                messageBuffer + totalBytesReceived, 
+                numBytes - totalBytesReceived
+            );
+            errIfNegative(amountAcquiredLastRecv, "recv failed"); 
+        }
     }
 
 
-    void receive(uint8_t* messageBuffer, int messageBufferLength)
+    Message receiveMessage(uint8_t* backingArray)
     {
-        int result = _receive(messageBuffer, messageBufferLength);
-        errIfNegative(result, "recv failed");
+        receive(backingArray, Message::headerSize); // receive header
+        Message message = Message::deserialize(backingArray); // parse header
+        receive(message.getStartOfData(), message.getDataLength()); // receive rest of Message
+        return message;
     }
 
 
-    bool receiveNonBlocking(uint8_t* messageBuffer, int messageBufferLength)
+    bool dataIsAvailable()
     {
+        uint8_t dummyArray;
         int result = _receive(
-            messageBuffer, messageBufferLength,
-            MSG_DONTWAIT // add special flag to make call nonblocking
+            &dummyArray, 1,
+            MSG_DONTWAIT | MSG_PEEK // MSG_DONTWAIT: make call nonblocking, MSG_PEEK: peek at data in socket queue instead of popping it
         );
 
-        if (result < 0 && (errno == EAGAIN  || errno == EWOULDBLOCK)) { // check if a message was received
+        // check if a message was received
+        if (result < 0 && (errno == EAGAIN  || errno == EWOULDBLOCK)) {
             return false;
+        } else {
+            errIfNegative(result, "nonblocking recv failed");
+            return true;
         }
-        errIfNegative(result, "nonblocking recv failed");
-        return true;
     }
 
 
-    void sendMsg(uint8_t* messageStart, int messageLength)
+    void sendData(uint8_t* messageStart, int messageLength)
     {
         int amountSentLastSend = 0;
 
@@ -203,6 +306,12 @@ public:
             );
             errIfNegative(amountSentLastSend, "send failed");
         }
+    }
+
+
+    void sendMessage(Message message) 
+    {
+        sendData(message.getSerialized(), message.getSerializedLength());
     }
 
     
@@ -225,122 +334,26 @@ private:
             errIfNegative(result, "closing _connection failed");
         }
     }
-};
 
 
-
-namespace DataType {
-    // DataTypes for outgoing messages
-    const uint8_t RGB = 'r';
-    const uint8_t DEPTH = 'd';
-
-    // DataTypes for incoming messages
-    const uint8_t DISCONNECT = 'd';
-    const uint8_t TILT = 't';
-    const uint8_t STOP_SERVER = 's';
-}
-
-
-// these should be set to bigger numbers than we actually need because they need to take the amount of metadata in a Message object into account and that's prone to changing
-const uint32_t MAX_INCOMING_MESSAGE_SIZE = 100; // The size of buffer to use for storing an incoming message
-const uint32_t MAX_OUTGOING_MESSAGE_SIZE = 1000000;
-
-
-// not using a POD because then serialization wouldn't be architecture agnostic
-class Message 
-{
-public:
-
-    // creates an empty message using the specified backing array
-    static Message createEmptyMessage(uint8_t* backingArray) {
-        return Message(backingArray);
-    }
-
-    // creates a new Message by wrapping a byte array from an already serialized Message
-    static Message deserialize(uint8_t* rawData) {
-        Message message(rawData);
-
-        // update metadata
-        uint8_t* nextAddress = message._rawBytes;
-        message._messageType = *nextAddress;
-        nextAddress += sizeof(_messageType);
-        message._rawBytesLength = *reinterpret_cast<uint32_t*>(nextAddress);
-
-        return message;
-    }
-
-    void setData(uint8_t messageType, uint8_t* messageContents, uint32_t dataLength) {
-        uint8_t* nextAddress = _rawBytes;
-
-        _messageType = messageType;
-        *nextAddress = _messageType;
-        nextAddress += sizeof(_messageType);
-
-        _rawBytesLength = dataLength + _totalMetaDataSize;
-        *reinterpret_cast<uint32_t*>(nextAddress) = _rawBytesLength;
-        nextAddress += sizeof(_rawBytesLength);
-
-        std::copy(messageContents, messageContents + dataLength, nextAddress);
-    }
-
-    uint8_t* getSerialized() { return _rawBytes; }
-    uint8_t* getStartOfData() { return _rawBytes + _totalMetaDataSize; }
-    uint32_t getSerializedLength() { return _rawBytesLength; }
-    uint8_t getMessageType() { return _messageType; }
-
-private:
-    uint8_t _messageType;
-    uint8_t* _rawBytes;
-    uint32_t _rawBytesLength;
-    static const uint32_t _totalMetaDataSize = sizeof(_messageType) + sizeof(_rawBytesLength);
-
-    Message(uint8_t* backingArray) {
-        _rawBytes = backingArray;
+    int _receive(uint8_t* messageBuffer, int messageBufferLength, int flags = 0)
+    {
+        return recv(_connection, messageBuffer, messageBufferLength, flags);
     }
 };
 
-
-/*
-bool handleResponse()
-{
-    uint8_t message[MAX_INCOMING_MESSAGE_SIZE];
-    server.receive(message, sizeof(message));
-    Message receivedMessage = Message::deserialize(message);
-    uint8_t messageType = receivedMessage.getMessageType();
-
-    switch (messageType) {
-        case DataType::DISCONNECT:
-            std::cout << "Recieved disconnect command. waiting for new client..." << std::endl;
-            server.connect_to_client(); // wait for new client
-            kinect->setTiltDegrees(0);
-            std::cout << "new client connected" << std::endl;
-            break;
-        case DataType::TILT: { // needs to be in its own scope or else the compiler will complain about the fact that we're initializing new variables which will still be accessible from other switch cases but will be initialized to garbage
-            uint8_t* tiltDataAddress = receivedMessage.getStartOfData();
-            signed char newTilt = *reinterpret_cast<signed char*>(tiltDataAddress);
-            std::cout << "Recieved tilt command: " << std::to_string(newTilt) << std::endl;
-            kinect->setTiltDegrees(newTilt);
-            break;
-        }
-        case DataType::STOP_SERVER:
-            std::cout << "Recieved stop server command." << std::endl;
-            serverRunning = false;
-            break;
-        default:
-            std::cout << "Recieved unknown command: " << std::to_string(messageType) << std::endl;
-            break;
-    }
-}
-*/
 
 
 void runServer(VRCarVision* kinect) 
 {
-    std::cout << kinect->rgbDataSize() << std::endl;
-    std::cout << kinect->depthDataSize() << std::endl;
+    std::cout << "server ready for connection" << std::endl;
 
-    TCPServer server(SERVER_PORT);
-    server.connect_to_client();
+    TCPServer sender(SEND_PORT);
+    TCPServer receiver(RECEIVE_PORT);
+    sender.connect_to_client();
+    receiver.connect_to_client();
+
+    std::cout << "client connected" << std::endl;
 
     uint8_t outgoingMessageBackingArray[MAX_OUTGOING_MESSAGE_SIZE];
     Message messageBuffer = Message::createEmptyMessage(outgoingMessageBackingArray);
@@ -349,13 +362,43 @@ void runServer(VRCarVision* kinect)
     while (serverRunning) {
 
         messageBuffer.setData(DataType::RGB, kinect->rgbData(), kinect->rgbDataSize());
-        server.sendMsg(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
-
+        sender.sendMessage(messageBuffer);
         messageBuffer.setData(DataType::DEPTH, kinect->depthData(), kinect->depthDataSize());
-        server.sendMsg(messageBuffer.getSerialized(), messageBuffer.getSerializedLength());
+        sender.sendMessage(messageBuffer);
+
+        if (receiver.dataIsAvailable()) {
+
+            uint8_t incomingMessageBackingArray[MAX_INCOMING_MESSAGE_SIZE];
+            Message receivedMessage = receiver.receiveMessage(incomingMessageBackingArray);
+            uint8_t messageType = receivedMessage.getMessageType();
+
+            switch (messageType) {
+                case DataType::DISCONNECT:
+                    std::cout << "Recieved disconnect command. waiting for new client..." << std::endl;
+                    sender.connect_to_client(); // wait for new client
+                    receiver.connect_to_client();
+                    kinect->setTiltDegrees(0);
+                    std::cout << "new client connected" << std::endl;
+                    break;
+                case DataType::TILT: { // needs to be in its own scope or else the compiler will complain about the fact that we're initializing new variables which will still be accessible from other switch cases but will be initialized to garbage
+                    uint8_t* tiltDataAddress = receivedMessage.getStartOfData();
+                    signed char newTilt = *reinterpret_cast<signed char*>(tiltDataAddress);
+                    std::cout << "Recieved tilt command: " << std::to_string(newTilt) << std::endl;
+                    kinect->setTiltDegrees(newTilt);
+                    break;
+                }
+                case DataType::STOP_SERVER:
+                    std::cout << "Recieved stop server command." << std::endl;
+                    serverRunning = false;
+                    break;
+                default:
+                    std::cout << "Recieved unknown command: " << std::to_string(messageType) << std::endl;
+                    break;
+            }
+        }
     }
 
-    server.stop();
+    sender.stop();
 }
 
 
@@ -372,20 +415,7 @@ int main()
     while (! kinect->hasVideoData()) {}
     kinect->setLed(LED_GREEN);
 
-    // Temp code: Set to true if you want to manually set the tilt on startup. Otherwise tilt is set to 0 deg
-    if ( 0 ) {
-        while (1) {
-            double degrees;
-            std::cout << "degrees to move (enter value >30 to exit): ";
-            std::cin >> degrees;
-            if (degrees <= 30 && degrees >= -30) {
-                kinect->setTiltDegrees(degrees);
-                break;
-            }
-        }
-    } else {
-        kinect->setTiltDegrees(0);
-    }
+    kinect->setTiltDegrees(0);
 
     runServer(kinect);
 
