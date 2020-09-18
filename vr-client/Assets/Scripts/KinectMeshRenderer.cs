@@ -38,67 +38,75 @@ public class KinectMeshRenderer : MonoBehaviour
     Vector2[] uvs;
     int[] triangles;
 
+    static readonly object lockObject = new object();
+
     public void asyncGenerateMesh(int[] depthValues)
     {
-        vertices = new Vector3[WIDTH * HEIGHT];
-        uvs = new Vector2[WIDTH * HEIGHT];
-        List<int> trianglesList = new List<int>();
-
-        Profiler.BeginSample("Get vertices");
-        for (int i = 0; i < WIDTH * HEIGHT; i++)
+        lock (lockObject)
         {
-            int x = i % WIDTH;
-            int y = i / WIDTH;
-            vertices[i] = depthToWorld(x, y, depthValues[i]);
-        }
-        Profiler.EndSample();
+            vertices = new Vector3[WIDTH * HEIGHT];
+            uvs = new Vector2[WIDTH * HEIGHT];
+            List<int> trianglesList = new List<int>();
 
-        Profiler.BeginSample("Get uv and triangles");
-        List<int> meshTrianglesList = new List<int>();
-        for (int x = 0; x < WIDTH - 1; x++)
-        {
-            for (int y = 0; y < HEIGHT - 1; y++)
+            Profiler.BeginSample("Get vertices");
+            for (int i = 0; i < WIDTH * HEIGHT; i++)
             {
-                int v1 = x + y * WIDTH;
-                uvs[v1] = new Vector2(
+                int x = i % WIDTH;
+                int y = i / WIDTH;
+                vertices[i] = depthToWorld(x, y, depthValues[i]);
+
+                uvs[i] = new Vector2(
                     Math.Max(Math.Min((1.07777777777777778f * x - 16.6666666f) / WIDTH, 1f), 0f),
                     Math.Min((0.9142857142857143f * y + 46.7142857f) / HEIGHT, 1f)  //y - 0.08571428571428572f * y + 46.7142857f
                 );
+            }
+            Profiler.EndSample();
 
-                int v2 = v1 + 1;
-                int v3 = v1 + WIDTH;
-
-                if (validPoint(v2, depthValues) && validPoint(v3, depthValues))
+            Profiler.BeginSample("Get uv and triangles");
+            List<int> meshTrianglesList = new List<int>();
+            int v1 = 0;
+            for (int x = 0; x < WIDTH - 1; x++)
+            {
+                for (int y = 0; y < HEIGHT - 1; y++)
                 {
-                    int v4 = v3 + 1;
-                    if (validPoint(v1, depthValues))
+
+                    int v2 = v1 + 1;
+                    int v3 = v1 + WIDTH;
+
+                    if (validPoint(v2, depthValues) && validPoint(v3, depthValues))
                     {
-                        trianglesList.Add(v1);
-                        trianglesList.Add(v3);
-                        trianglesList.Add(v2);
+                        int v4 = v3 + 1;
+                        if (validPoint(v1, depthValues))
+                        {
+                            trianglesList.Add(v1);
+                            trianglesList.Add(v3);
+                            trianglesList.Add(v2);
+                        }
+                        if (validPoint(v4, depthValues))
+                        {
+                            trianglesList.Add(v2);
+                            trianglesList.Add(v3);
+                            trianglesList.Add(v4);
+                        }
                     }
-                    if (validPoint(v4, depthValues))
-                    {
-                        trianglesList.Add(v2);
-                        trianglesList.Add(v3);
-                        trianglesList.Add(v4);
-                    }
+
+                    v1++;
                 }
             }
+
+            Profiler.EndSample();
+            Profiler.BeginSample("convert triangle List");
+
+            triangles = trianglesList.ToArray();
+
+            Profiler.EndSample();
+            
+            meshState = MeshState.HasNewData;
         }
-        Profiler.EndSample();
-
-        Profiler.BeginSample("convert triangle List");
-        triangles = trianglesList.ToArray();
-        Profiler.EndSample();
-
-        meshState = MeshState.HasNewData;
     }
 
     /*
     * Converts a raw kinect depth reading to the depth in meters
-    * Invalid depths return 8m since this is further than the kinect can actually read
-    * (although such vertices should probably never wind up being used by the mesh)
     */
     float rawDepthToMeters(int depthValue)
     {
@@ -132,9 +140,10 @@ public class KinectMeshRenderer : MonoBehaviour
      */
     bool validPoint(int index, int[] depthValues)
     {
-        return depthValues[index] < 2047;/* && (
-            (index % WIDTH == WIDTH - 1 || Math.Abs(depthValues[index] - depthValues[index + 1]) < edgeSize) &&
-            (index / WIDTH == HEIGHT - 1 || Math.Abs(depthValues[index] - depthValues[index + WIDTH]) < edgeSize));*/
+        return depthValues[index] < 2047 &&
+            //Gross temp edge detection
+            ((index % WIDTH == WIDTH - 1 || Math.Abs(depthValues[index] - depthValues[index + 1]) < edgeSize) &&
+            (index / WIDTH == HEIGHT - 1 || Math.Abs(depthValues[index] - depthValues[index + WIDTH]) < edgeSize));
     }
 
     /*
@@ -147,17 +156,24 @@ public class KinectMeshRenderer : MonoBehaviour
 
     /* Begin processing vision data in a worker thread
      */
-    public void updateVision(Texture2D newTexture, int[] newDepthValues)
+    public void updateVision(int[] newDepthValues)
     {
         if (meshState == MeshState.HasOldData) { // Only accept a new frame if the last one is finished processing. Note: Unity makes sure meshValJobHandle can't be null
             meshState = MeshState.GeneratingData;
+
             Profiler.BeginSample("Begin update vision job");
+
             Thread thread = new Thread(() => asyncGenerateMesh(newDepthValues));
             thread.Start();
-            texture = newTexture; //Prepare texture for application once mesh is ready
+
             Profiler.EndSample();
         }
         
+    }
+
+    public void updateVision(Texture2D newTexture)
+    {
+        meshRenderer.material.SetTexture(mainTextureId, newTexture);
     }
 
     void Awake()
@@ -208,16 +224,19 @@ public class KinectMeshRenderer : MonoBehaviour
     {
         if(meshState == MeshState.HasNewData) // Has recieved data
         {
-            Profiler.BeginSample("Update kinect mesh renderer");
-            mesh.vertices = vertices;
-            mesh.triangles = triangles;
+            lock (lockObject)
+            {
+                Profiler.BeginSample("Update kinect mesh renderer");
 
-            mesh.uv = uvs;
-            meshRenderer.material.SetTexture(mainTextureId, texture);
-            meshFilter.mesh = mesh;
+                mesh.vertices = vertices;
+                mesh.triangles = triangles;
+                mesh.uv = uvs;
+                meshFilter.mesh = mesh;
 
-            meshState = MeshState.HasOldData;
-            Profiler.EndSample();
+                Profiler.EndSample();
+
+                meshState = MeshState.HasOldData;
+            }
         }
     }
 }

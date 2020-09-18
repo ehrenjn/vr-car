@@ -7,12 +7,12 @@ public class UserManager : MonoBehaviour
 {
 
     public int currentAngle = 0;
-    UDPManager udpManager;
+    TCPManager tcpManager;
 
     // Start is called before the first frame update
     void Start()
     {
-        udpManager = GetComponent<UDPManager>();
+        tcpManager = GetComponent<TCPManager>();
     }
 
     void attemptTiltChange(int newTilt)
@@ -21,7 +21,7 @@ public class UserManager : MonoBehaviour
         if (newTilt != currentAngle)
         {
             currentAngle = newTilt;
-            udpManager.requestTiltChange(currentAngle);
+            tcpManager.requestTiltChange(currentAngle);
         }
     }
 
