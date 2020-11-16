@@ -6,16 +6,23 @@ WHAT IF THE SERVER IS SENDING DATA TOO FAST? IS THAT POSSIBLE?
         these systems aren't "supposed" to receive every bit of video... so missing bits becuase we're too slow actually makes sense
 IT WOULD BE MORE OOP FOR SEND AND RECEIVE CALLS TO TAKE OR RETURN AN OBJECT THAT CONTAINS AN ADDRESS AND POINTER TO DATA, BUT MIGHT BE A MESS, IDK
     only bother doing this if you need to know length of message received I guess
-THERES LOTS OF VISUAL GLITCHES RIGHT NOW, PROBABLY NEED SOME KIND OF CHECKSUM
-STREAM SEEMS TO GET LAGGIER WHEN IT'S ON FOR A WHILE???
-FOR SOME REASON THE VERY LAST (BOTTOM) SEGMENT OF DATA IS PICKED UP BY THE CLIENT LESS OFTEN THAN OTHER SEGMENTS?
-FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTEAD OF messageSize THATS SENT IN THE PACKET ITSELF THEN IT GETS AN EXTRA 3 BYTES... BUT ONLY ON THE FINAL SEGMENT
+udp only problems:
+    THERES LOTS OF VISUAL GLITCHES RIGHT NOW, PROBABLY NEED SOME KIND OF CHECKSUM
+    STREAM SEEMS TO GET LAGGIER WHEN IT'S ON FOR A WHILE???
+    FOR SOME REASON THE VERY LAST (BOTTOM) SEGMENT OF DATA IS PICKED UP BY THE CLIENT LESS OFTEN THAN OTHER SEGMENTS?
+    FOR SOME REASON WHEN THE CLIENT TRIES TO USE THE SIZE OF THE ACTUAL PACKET INSTEAD OF messageSize THATS SENT IN THE PACKET ITSELF THEN IT GETS AN EXTRA 3 BYTES... BUT ONLY ON THE FINAL SEGMENT
 Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to save bandwidth
     Maybe do: Modify libfreenect to support 320x240 QVGA depth resolution like the official SDK
     640x480 has a lot of noise, not very worth the 4x bandwidth usage
 CAN MAKE EVERYTHING MORE EFFICIENT BY HAVING A COMPLETELY SEPERATE BYTE ARRAY FOR HEADER AND DATA IN THE Message CLASS
     CAN DO THIS NOW BECAUSE TCP IS STREAM BASED
     might not be worth it because the copying doesn't seem to be wasting too much time... but it is kinda dumb so it'd be nice to avoid
+DEPTH DATA DOESN'T MATCH UP WITH RGB DATA, GONNA HAVE TO USE MUTEXES OR WHATEVER
+    should add 2 things:
+        1.) lock method on the VRCarVision that would just set a boolean telling the rgb and depth callbacks to stop updating (this would basically solve your problem without any mutexes)
+        2.) mutexes in depth and rgb callbacks so that we can't read potentially funky half written data (if you do this you would have to make the lock method incorporate the mutexes too but it would be pretty nice)
+    Should probably use unique_lock instead of lock_guard but dunno yet
+    Also almost all this stuff would be fixed by just having 2 message objects but locking is still nice for not having half read data... That being said it would still be nice to have 2 messages because it just looks better and the mutexes wouldnt be locked for as long
 */
 
 
@@ -23,6 +30,7 @@ CAN MAKE EVERYTHING MORE EFFICIENT BY HAVING A COMPLETELY SEPERATE BYTE ARRAY FO
 #include <iostream>
 #include <memory>
 #include <string>
+#include <mutex>
 
 #include <sys/socket.h>
 #include <unistd.h> // defines close function (for all file descriptors)
@@ -40,6 +48,9 @@ class VRCarVision : public Freenect::FreenectDevice
 {
 public:
 
+    std::mutex depthDataMutex;
+    std::mutex rgbDataMutex;
+
     VRCarVision(freenect_context* _ctx, int _index) : 
         Freenect::FreenectDevice(_ctx, _index),
         _hasDepthData(false),
@@ -55,6 +66,7 @@ public:
 
     void VideoCallback(void* newFrame, uint32_t) override 
     {
+        std::lock_guard<std::mutex> lock(rgbDataMutex);
         if (_rgbData != nullptr) {
             uint8_t* frameData = static_cast<uint8_t*>(newFrame);
             std::copy(frameData, frameData + getVideoBufferSize(), _rgbData.get());
@@ -64,6 +76,7 @@ public:
 
     void DepthCallback(void* newFrame, uint32_t)
     {
+        std::lock_guard<std::mutex> lock(depthDataMutex);
         if (_depthData != nullptr) {
             uint8_t* frameData = static_cast<uint8_t*>(newFrame);
             std::copy(frameData, frameData + getDepthBufferSize(), _depthData.get());
@@ -91,7 +104,7 @@ public:
     int depthDataSize() { return getDepthBufferSize(); }
 
 private:
-    bool _hasDepthData; // to avoid sending garbage, keep track of whether _videoData has been filled with real data or not
+    bool _hasDepthData; // to avoid sending garbage, keep track of whether _rgbData and _depthData have real data or not
     bool _hasRGBData; 
     std::unique_ptr<uint8_t[]> _rgbData;
     std::unique_ptr<uint8_t[]> _depthData;
@@ -355,16 +368,23 @@ void runServer(VRCarVision* kinect)
 
     std::cout << "client connected" << std::endl;
 
-    uint8_t outgoingMessageBackingArray[MAX_OUTGOING_MESSAGE_SIZE];
-    Message messageBuffer = Message::createEmptyMessage(outgoingMessageBackingArray);
+    uint8_t rgbMessageBackingArray[MAX_OUTGOING_MESSAGE_SIZE];
+    uint8_t depthMessageBackingArray[MAX_OUTGOING_MESSAGE_SIZE]; // using 2 message buffers instead of reusing 1 for both rgb and depth because we want to keep mutexes locked for as short a time as possible and we can only do that if we can load depth and rgb data into Messages at the same time (without sending one of them)
+    Message rbgMessageBuffer = Message::createEmptyMessage(rgbMessageBackingArray);
+    Message depthMessageBuffer = Message::createEmptyMessage(depthMessageBackingArray);
     
     bool serverRunning = true;
     while (serverRunning) {
 
-        messageBuffer.setData(DataType::RGB, kinect->rgbData(), kinect->rgbDataSize());
-        sender.sendMessage(messageBuffer);
-        messageBuffer.setData(DataType::DEPTH, kinect->depthData(), kinect->depthDataSize());
-        sender.sendMessage(messageBuffer);
+        {
+            // make sure rgb and depth frames are finished writing by locking the data mutexes (also helps to ensure data for rgb and depth frames are more closely synced)
+            std::lock_guard<std::mutex> rgbLock(kinect->rgbDataMutex);
+            std::lock_guard<std::mutex> depthLock(kinect->depthDataMutex);
+            rbgMessageBuffer.setData(DataType::RGB, kinect->rgbData(), kinect->rgbDataSize());
+            depthMessageBuffer.setData(DataType::DEPTH, kinect->depthData(), kinect->depthDataSize());
+        }
+        sender.sendMessage(rbgMessageBuffer);
+        sender.sendMessage(depthMessageBuffer);
 
         if (receiver.dataIsAvailable()) {
 

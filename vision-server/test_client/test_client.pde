@@ -8,7 +8,7 @@ import java.io.DataInputStream;
 final DataType DISPLAY_DATA_TYPE = DataType.RGB; //Set to DataType.RGB to see RGB data or DataType.DEPTH to see depth data
 final int SERVER_OUTPUT_PORT = 6969;
 final int SERVER_INPUT_PORT = 7878;
-final String SERVER_IP = "192.168.0.237";
+final String SERVER_IP = "192.168.60.102";
 
 
 
