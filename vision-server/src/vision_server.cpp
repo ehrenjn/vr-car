@@ -17,12 +17,6 @@ Use format FREENECT_DEPTH_11BIT_PACKED or FREENECT_DEPTH_10BIT_PACKED instead to
 CAN MAKE EVERYTHING MORE EFFICIENT BY HAVING A COMPLETELY SEPERATE BYTE ARRAY FOR HEADER AND DATA IN THE Message CLASS
     CAN DO THIS NOW BECAUSE TCP IS STREAM BASED
     might not be worth it because the copying doesn't seem to be wasting too much time... but it is kinda dumb so it'd be nice to avoid
-DEPTH DATA DOESN'T MATCH UP WITH RGB DATA, GONNA HAVE TO USE MUTEXES OR WHATEVER
-    should add 2 things:
-        1.) lock method on the VRCarVision that would just set a boolean telling the rgb and depth callbacks to stop updating (this would basically solve your problem without any mutexes)
-        2.) mutexes in depth and rgb callbacks so that we can't read potentially funky half written data (if you do this you would have to make the lock method incorporate the mutexes too but it would be pretty nice)
-    Should probably use unique_lock instead of lock_guard but dunno yet
-    Also almost all this stuff would be fixed by just having 2 message objects but locking is still nice for not having half read data... That being said it would still be nice to have 2 messages because it just looks better and the mutexes wouldnt be locked for as long
 */
 
 
