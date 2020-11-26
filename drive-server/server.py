@@ -7,6 +7,7 @@ GPIO.setup(12, GPIO.OUT)
 GPIO.setup(33, GPIO.OUT)
 
 pwm = GPIO.PWM(12, 500) # start pwm at 500hz
+pwm = GPIO.PWM(33, 500) # start pwm at 500hz
 
 
 pwm.start(0)
