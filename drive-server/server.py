@@ -3,32 +3,47 @@ import RPi.GPIO as GPIO
 GPIO.setmode(GPIO.BOARD) # use BOARD pin numbering so that we can switch out pis and the same pins work (hopefully)
 
 # pin 12 and 32 are mirrored (they always have the same output) and are 2 of the only 4 pwm pins, so they will be used for output
-GPIO.setup(12, GPIO.OUT)
-GPIO.setup(32, GPIO.OUT)
+class Wheel:
 
-GPIO.setup(22, GPIO.OUT)
-GPIO.setup(24, GPIO.OUT)
-GPIO.setup(26, GPIO.OUT)
-GPIO.setup(18, GPIO.OUT)
+    def __init__(self, forward_pin, backward_pin, pwm_pin):
+        self.forward_pin = forward_pin
+        self.backward_pin = backward_pin
+        self.pwm_pin = pwm_pin
 
-GPIO.output(18, 0)
-GPIO.output(22, 1)
-GPIO.output(24, 0)
-GPIO.output(26, 1)
-import time; time.sleep(0.5)
-'''
-pwm1 = GPIO.PWM(12, 500) # start pwm at 500hz
-pwm2 = GPIO.PWM(32, 500) # start pwm at 500hz
+        GPIO.setup(self.forward_pin, GPIO.OUT)
+        GPIO.setup(self.backward_pin, GPIO.OUT)
+        GPIO.setup(self.pwm_pin, GPIO.OUT)
+        self.pwm = GPIO.PWM(self.pwm_pin, 500) # start pwm at 500hz
+        self.pwm.start(0) # start unmoving
+
+
+    def move(self, speed):
+        # set both pins to 0 because idk what happens if they're both high at once
+        self.forward_pin(0)
+        self.backward_pin(0)
+
+        self.forward_pin(1 if speed > 0 else 0)
+        self.backward_pin(1 if speed < 0 else 0)
+        self.pwm.ChangeDutyCycle(abs(speed))
+
+
+    def forward(self, speed):
+        self.move(speed)
+
+    def backward(self, speed):
+        self.move(-speed)
+
+
+
+left = Wheel(24, 26, 32)
+right = Wheel(18, 22, 12)
 
 duty = 0
-pwm1.start(duty)
-pwm2.start(duty)
 while duty <= 100:
-    pwm1.ChangeDutyCycle(duty)
-    pwm2.ChangeDutyCycle(duty)
+    left.move(duty)
+    right.move(duty)
     duty = int(input("new duty cycle (0 - 100): "))
 
-pwm1.stop()
-pwm2.stop()
-'''
+
+
 GPIO.cleanup()
