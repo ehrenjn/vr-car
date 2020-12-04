@@ -6,9 +6,19 @@ GPIO.setmode(GPIO.BOARD) # use BOARD pin numbering so that we can switch out pis
 GPIO.setup(12, GPIO.OUT)
 GPIO.setup(32, GPIO.OUT)
 
+GPIO.setup(22, GPIO.OUT)
+GPIO.setup(24, GPIO.OUT)
+GPIO.setup(26, GPIO.OUT)
+GPIO.setup(18, GPIO.OUT)
+
+GPIO.output(18, 0)
+GPIO.output(22, 1)
+GPIO.output(24, 0)
+GPIO.output(26, 1)
+import time; time.sleep(0.5)
+'''
 pwm1 = GPIO.PWM(12, 500) # start pwm at 500hz
 pwm2 = GPIO.PWM(32, 500) # start pwm at 500hz
-
 
 duty = 0
 pwm1.start(duty)
@@ -20,4 +30,5 @@ while duty <= 100:
 
 pwm1.stop()
 pwm2.stop()
+'''
 GPIO.cleanup()
