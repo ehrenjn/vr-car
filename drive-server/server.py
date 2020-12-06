@@ -1,6 +1,14 @@
 import RPi.GPIO as GPIO
+import socketserver
+from collections import namedtuple
+
+
+IP = '0.0.0.0'
+PORT = 55555
 
 GPIO.setmode(GPIO.BOARD) # use BOARD pin numbering so that we can switch out pis and the same pins work (hopefully)
+
+
 
 # pin 12 and 32 are mirrored (they always have the same output) and are 2 of the only 4 pwm pins, so they will be used for output
 class Wheel:
@@ -35,15 +43,24 @@ class Wheel:
 
 
 
-left = Wheel(24, 26, 32)
-right = Wheel(18, 22, 12)
+CAR = namedtuple('Car', ['left', 'right']) (
+    left = Wheel(24, 26, 32),
+    right = Wheel(18, 22, 12)
+)
 
-duty = 0
-while duty <= 100:
-    left.move(duty)
-    right.move(duty)
-    duty = int(input("new duty cycle (0 - 100): "))
 
+
+class CarRequestHandler(socketserver.BaseRequestHandler):
+    MAX_MESSAGE_LENGTH = 100
+
+    def handle(self):
+        self.request.recv(CarRequestHandler.MAX_MESSAGE_LENGTH)
+        # EH, SCREW THIS WHOLE socketserver THING, I WANT TO DO A HEARTBEAT AND THATS EASIER WITH RAW socketSs
+
+
+if __name__ == "__main__":
+    server = socketserver.TCPServer((IP, PORT), CarRequestHandler)
+    server.serve_forever()
 
 
 GPIO.cleanup()
