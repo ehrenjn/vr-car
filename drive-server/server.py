@@ -1,6 +1,5 @@
 import RPi.GPIO as GPIO
-import socketserver
-from collections import namedtuple
+import socket
 
 
 IP = '0.0.0.0'
@@ -43,24 +42,38 @@ class Wheel:
 
 
 
-CAR = namedtuple('Car', ['left', 'right']) (
-    left = Wheel(24, 26, 32),
-    right = Wheel(18, 22, 12)
-)
+class TCPServer:
 
-
-
-class CarRequestHandler(socketserver.BaseRequestHandler):
     MAX_MESSAGE_LENGTH = 100
+    HEARTBEAT_INTERVAL = 2
 
-    def handle(self):
-        self.request.recv(CarRequestHandler.MAX_MESSAGE_LENGTH)
-        # EH, SCREW THIS WHOLE socketserver THING, I WANT TO DO A HEARTBEAT AND THATS EASIER WITH RAW socketSs
+    def __init__(self, ip, port, left_wheel, right_wheel):
+        self.left_wheel = left_wheel
+        self.right_wheel = right_wheel
+        self.socket = socket.socket()
+        self.socket.bind((ip, port))
+
+    def serve(self):
+        self.socket.listen()
+        print("listening for client...")
+        client, _ = self.socket.accept()
+        print("connected to client")
+        client.settimeout(TCPServer.HEARTBEAT_INTERVAL)
+        while True:
+            try:
+                message = client.recv(TCPServer.MAX_MESSAGE_LENGTH)
+            except socket.timeout:
+                print("stopping car due to timeout")
+                self.left_wheel.move(0)
+                self.right_wheel.move(0)
+
 
 
 if __name__ == "__main__":
-    server = socketserver.TCPServer((IP, PORT), CarRequestHandler)
-    server.serve_forever()
+    left = Wheel(24, 26, 32)
+    right = Wheel(18, 22, 12)
+    server = TCPServer(IP, PORT, ..., ...)#left, right)
+    server.serve()
 
 
 GPIO.cleanup()
