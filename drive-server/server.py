@@ -1,5 +1,6 @@
 import RPi.GPIO as GPIO
 import socket
+import re
 
 
 IP = '0.0.0.0'
@@ -9,7 +10,6 @@ GPIO.setmode(GPIO.BOARD) # use BOARD pin numbering so that we can switch out pis
 
 
 
-# pin 12 and 32 are mirrored (they always have the same output) and are 2 of the only 4 pwm pins, so they will be used for output
 class Wheel:
 
     def __init__(self, forward_pin, backward_pin, pwm_pin):
@@ -53,26 +53,39 @@ class TCPServer:
         self.socket = socket.socket()
         self.socket.bind((ip, port))
 
+
     def serve(self):
         self.socket.listen()
         print("listening for client...")
         client, _ = self.socket.accept()
         print("connected to client")
         client.settimeout(TCPServer.HEARTBEAT_INTERVAL)
+
         while True:
             try:
                 message = client.recv(TCPServer.MAX_MESSAGE_LENGTH)
+                self._handle_message(message)
             except socket.timeout:
                 print("stopping car due to timeout")
                 self.left_wheel.move(0)
                 self.right_wheel.move(0)
+        
+
+    def _handle_message(self, message):
+        command = re.search(b"^(?P<left>-?\d+),(?P<right>-?\d+)$", message)
+        if command is not None:
+            left_speed = int(command.group('left'))
+            right_speed = int(command.group('right'))
+            print("received command - left:", left_speed, ", right:", right_speed)
+            self.left_wheel.move(left_speed)
+            self.right_wheel.move(right_speed)
 
 
 
 if __name__ == "__main__":
     left = Wheel(24, 26, 32)
     right = Wheel(18, 22, 12)
-    server = TCPServer(IP, PORT, ..., ...)#left, right)
+    server = TCPServer(IP, PORT, left, right)
     server.serve()
 
 
