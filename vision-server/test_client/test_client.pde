@@ -8,7 +8,8 @@ import java.io.DataInputStream;
 final DataType DISPLAY_DATA_TYPE = DataType.RGB; //Set to DataType.RGB to see RGB data or DataType.DEPTH to see depth data
 final int SERVER_OUTPUT_PORT = 6969;
 final int SERVER_INPUT_PORT = 7878;
-final String SERVER_IP = "192.168.60.102";
+final int DRIVE_SERVER_PORT = 55555;
+final String SERVER_IP = "192.168.60.144";
 
 
 
@@ -86,7 +87,7 @@ class TCPClient {
     } catch(Exception e) { error(e); }
   }
   
-  public Message receive() {
+  public synchronized Message receive() {
     byte[] header = receiveBytes(Message.HEADER_SIZE);
     DataType dataType = DataType.fromByte(header[0]);
     int dataLength = readBytesAsUInt32(header, 1, 4) - Message.HEADER_SIZE;
@@ -94,7 +95,7 @@ class TCPClient {
     return new Message(dataType, data);
   }
   
-  public byte[] receiveBytes(int numBytes) {
+  public synchronized byte[] receiveBytes(int numBytes) {
     byte[] bytes = new byte[numBytes];
     try {
       socketReader.readFully(bytes);
@@ -102,12 +103,12 @@ class TCPClient {
     return bytes;
   }
   
-  public void send(Message message) {
+  public synchronized void send(Message message) {
     sendBytes(message.serializeHeader());
     sendBytes(message.data);
   }
   
-  public void sendBytes(byte[] bytes) {
+  public synchronized void sendBytes(byte[] bytes) {
     try {
       socketWriter.write(bytes);
     } catch (IOException e) { error(e); }
@@ -129,12 +130,22 @@ class TCPClient {
 
 TCPClient RECEIVER;
 TCPClient SENDER;
+TCPClient DRIVE_CLIENT;
 
 
 void setup() {
   RECEIVER = new TCPClient(SERVER_IP, SERVER_OUTPUT_PORT);
   SENDER = new TCPClient(SERVER_IP, SERVER_INPUT_PORT);
+  DRIVE_CLIENT = new TCPClient(SERVER_IP, DRIVE_SERVER_PORT);
+  thread("driveClientHeartbeat"); // start sending drive client heartbeat in a new thread
   size(640, 480);
+}
+
+
+void driveClientHeartbeat() {
+  for (;;) {
+    DRIVE_CLIENT.sendBytes("heartbeat".getBytes()); 
+  }
 }
 
 
@@ -154,7 +165,7 @@ void display_rgb(byte[] data) {
 void display_depth(byte[] data) {
   for (int b = 0; b < data.length; b += 2) {
     int colorIntensity;
-    if (data[b+1] == 7){
+    if (data[b+1] == 7) {
       colorIntensity = 0;
     } else {
       colorIntensity = ((data[b] & 0xff) + (data[b+1] << 8) ) >> 2;
@@ -202,7 +213,26 @@ void keyPressed() {
     }
   }
   
-  else if (key == 's') {
+  else if (key == 'q') {
     SENDER.send(new Message(DataType.STOP_SERVER, new byte[]{}));
+  }
+  
+  else if ("wasd".indexOf(key) != -1) {
+    String command = "";
+    switch (key) {
+      case 'w': // forward
+        command = "70,70";
+        break;
+      case 's': // backward
+        command = "-70,-70";
+        break;
+      case 'a': // left
+        command = "-70,70";
+        break;
+      case 'd': // right
+        command = "70,-70";
+        break;
+    }
+    DRIVE_CLIENT.sendBytes(command.getBytes()); 
   }
 }
