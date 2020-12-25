@@ -113,6 +113,10 @@ class TCPClient {
       socketWriter.write(bytes);
     } catch (IOException e) { error(e); }
   }
+  
+  public synchronized void sendString(String data) {
+    sendBytes(data.getBytes()); 
+  }
  
   public void close() {
     try {
@@ -192,6 +196,7 @@ void draw() {
 
 
 int CURRENT_ANGLE = 0;
+String DRIVE_KEYS = "wasd";
 
 void keyPressed() {
   if (keyCode == UP || keyCode == DOWN) {
@@ -217,7 +222,7 @@ void keyPressed() {
     SENDER.send(new Message(DataType.STOP_SERVER, new byte[]{}));
   }
   
-  else if ("wasd".indexOf(key) != -1) {
+  else if (DRIVE_KEYS.indexOf(key) != -1) {
     String command = "";
     switch (key) {
       case 'w': // forward
@@ -233,6 +238,13 @@ void keyPressed() {
         command = "70,-70";
         break;
     }
-    DRIVE_CLIENT.sendBytes(command.getBytes()); 
+    DRIVE_CLIENT.sendString(command); 
+  }
+}
+
+
+void keyReleased() {
+  if (DRIVE_KEYS.indexOf(key) != -1) {
+    DRIVE_CLIENT.sendString("0,0");
   }
 }
