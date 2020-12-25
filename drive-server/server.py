@@ -26,11 +26,13 @@ class Wheel:
 
     def move(self, speed):
         # set both pins to 0 because idk what happens if they're both high at once
-        self.forward_pin(0)
-        self.backward_pin(0)
+        GPIO.output(forward_pin, GPIO.LOW)
+        GPIO.output(backward_pin, GPIO.LOW)
 
-        self.forward_pin(1 if speed > 0 else 0)
-        self.backward_pin(1 if speed < 0 else 0)
+        forward_pin_value = GPIO.HIGH if speed > 0 else GPIO.LOW
+        backward_pin_value = GPIO.HIGH if speed < 0 else GPIO.LOW
+        GPIO.output(forward_pin, forward_pin_value)
+        GPIO.output(backward_pin, backward_pin_value)
         self.pwm.ChangeDutyCycle(abs(speed))
 
 
