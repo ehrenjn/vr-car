@@ -9,7 +9,7 @@ final DataType DISPLAY_DATA_TYPE = DataType.RGB; //Set to DataType.RGB to see RG
 final int SERVER_OUTPUT_PORT = 6969;
 final int SERVER_INPUT_PORT = 7878;
 final int DRIVE_SERVER_PORT = 55555;
-final String SERVER_IP = "192.168.60.144";
+final String SERVER_IP = "192.168.1.23";
 
 
 
@@ -149,6 +149,7 @@ void setup() {
 void driveClientHeartbeat() {
   for (;;) {
     DRIVE_CLIENT.sendBytes("heartbeat".getBytes()); 
+    delay(1000);
   }
 }
 
