@@ -79,12 +79,10 @@ class TCPClient {
   private DataInputStream socketReader;
   private OutputStream socketWriter;
  
-  public TCPClient(String serverAddress, int serverPort) {
-    try {
-      this.socket = new Socket(serverAddress, serverPort);
-      this.socketReader = new DataInputStream(this.socket.getInputStream()); // need to wrap in a DataInputStream so that we get the readFully() function (plain InputStream's read(n) function reads a MAXIMUM of n bytes, readFully always reads n bytes
-      this.socketWriter = this.socket.getOutputStream();
-    } catch(Exception e) { error(e); }
+  public TCPClient(String serverAddress, int serverPort) throws IOException {
+    this.socket = new Socket(serverAddress, serverPort);
+    this.socketReader = new DataInputStream(this.socket.getInputStream()); // need to wrap in a DataInputStream so that we get the readFully() function (plain InputStream's read(n) function reads a MAXIMUM of n bytes, readFully always reads n bytes
+    this.socketWriter = this.socket.getOutputStream();
   }
   
   public synchronized Message receive() {
@@ -138,10 +136,20 @@ TCPClient DRIVE_CLIENT;
 
 
 void setup() {
-  RECEIVER = new TCPClient(SERVER_IP, SERVER_OUTPUT_PORT);
-  SENDER = new TCPClient(SERVER_IP, SERVER_INPUT_PORT);
-  DRIVE_CLIENT = new TCPClient(SERVER_IP, DRIVE_SERVER_PORT);
-  thread("driveClientHeartbeat"); // start sending drive client heartbeat in a new thread
+  try {
+    RECEIVER = new TCPClient(SERVER_IP, SERVER_OUTPUT_PORT);
+    SENDER = new TCPClient(SERVER_IP, SERVER_INPUT_PORT);
+  } catch (IOException e) {
+    println("can't connect to vision server");
+  }
+  
+  try {
+    DRIVE_CLIENT = new TCPClient(SERVER_IP, DRIVE_SERVER_PORT);
+    thread("driveClientHeartbeat"); // start sending drive client heartbeat in a new thread
+  } catch (IOException e) {
+    println("can't connect to drive server");
+  }
+  
   size(640, 480);
 }
 
@@ -183,15 +191,17 @@ void display_depth(byte[] data) {
 
 
 void draw() {
-  Message frame = RECEIVER.receive();
-  if (frame.dataType == DISPLAY_DATA_TYPE) {
-    loadPixels();
-    if (frame.dataType == DataType.RGB ) {
-      display_rgb(frame.data);
-    } else if (frame.dataType == DataType.DEPTH ) {
-      display_depth(frame.data);
+  if (RECEIVER != null && SENDER != null) {
+    Message frame = RECEIVER.receive();
+    if (frame.dataType == DISPLAY_DATA_TYPE) {
+      loadPixels();
+      if (frame.dataType == DataType.RGB ) {
+        display_rgb(frame.data);
+      } else if (frame.dataType == DataType.DEPTH ) {
+        display_depth(frame.data);
+      }
+      updatePixels();
     }
-    updatePixels();
   }
 }
 

@@ -54,23 +54,33 @@ class TCPServer:
         self.right_wheel = right_wheel
         self.socket = socket.socket()
         self.socket.bind((ip, port))
+    
+
+    def serve_until_shutdown():
+        serving = True
+        while serving:
+            self.socket.listen()
+            print("listening for client...")
+            client, _ = self.socket.accept()
+            print("connected to client")
+            client.settimeout(TCPServer.HEARTBEAT_INTERVAL)
+            serving = self._serve(client)
+            print("client disconnected")
+        print("server shutting down")
 
 
-    def serve(self):
-        self.socket.listen()
-        print("listening for client...")
-        client, _ = self.socket.accept()
-        print("connected to client")
-        client.settimeout(TCPServer.HEARTBEAT_INTERVAL)
-
+    def _serve(self, client):
         while True:
             try:
                 message = client.recv(TCPServer.MAX_MESSAGE_LENGTH)
+                if message == b'': # an empty string means the client has disconnected
+                    return True 
                 self._handle_message(message)
             except socket.timeout:
                 print("stopping car due to timeout")
                 self.left_wheel.move(0)
                 self.right_wheel.move(0)
+            except 
         
 
     def _handle_message(self, message):
@@ -88,7 +98,7 @@ if __name__ == "__main__":
     left = Wheel(24, 26, 32)
     right = Wheel(18, 22, 12)
     server = TCPServer(IP, PORT, left, right)
-    server.serve()
+    server.serve_until_shutdown()
 
 
 GPIO.cleanup()
