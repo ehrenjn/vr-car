@@ -59,7 +59,6 @@ class StreamLineParser:
         for _ in range(num_lines):
             line_end = self._data.index(ord('\n'), line_start) # ord because data is stored as ints now and not byte strings, also start searching at line_start
             line = self._data[line_start:line_end]
-            print(line)
             yield bytes(line)
             line_start = line_end + 1
 
@@ -90,6 +89,7 @@ class TCPServer:
             client.settimeout(TCPServer.HEARTBEAT_INTERVAL)
             serving = self._serve(client)
             print("client disconnected")
+            self._stop_car() # make sure car has stopped when client disconnects
         print("server shutting down")
 
 
@@ -100,8 +100,7 @@ class TCPServer:
                 message = client.recv(TCPServer.MAX_MESSAGE_LENGTH)
             except socket.timeout:
                 print("stopping car due to timeout")
-                self.left_wheel.move(0)
-                self.right_wheel.move(0) 
+                self._stop_car()
             except ConnectionResetError: # this means a client has disconnected
                 return True
             else: # recv was successful
@@ -109,7 +108,7 @@ class TCPServer:
                     return True 
                 else:
                     for line in message_splitter.get_lines(message):
-                        self._handle_message(message)
+                        self._handle_message(line)
 
 
     def _handle_message(self, message):
@@ -122,6 +121,11 @@ class TCPServer:
             self.right_wheel.move(right_speed)
         else:
             print("got non command message: ", message)
+    
+
+    def _stop_car(self):
+        self.left_wheel.move(0)
+        self.right_wheel.move(0) 
 
 
 
