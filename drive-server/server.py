@@ -92,6 +92,8 @@ class TCPServer:
             print("received command - left:", left_speed, ", right:", right_speed)
             self.left_wheel.move(left_speed)
             self.right_wheel.move(right_speed)
+        else:
+            print("got non command message: ", message)
 
 
 
