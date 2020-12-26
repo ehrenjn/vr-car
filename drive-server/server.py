@@ -56,7 +56,7 @@ class TCPServer:
         self.socket.bind((ip, port))
     
 
-    def serve_until_shutdown():
+    def serve_until_shutdown(self):
         serving = True
         while serving:
             self.socket.listen()
@@ -79,9 +79,10 @@ class TCPServer:
             except socket.timeout:
                 print("stopping car due to timeout")
                 self.left_wheel.move(0)
-                self.right_wheel.move(0)
-            except 
-        
+                self.right_wheel.move(0) 
+            except ConnectionResetError: # this also means a client has disconnected
+                return True
+
 
     def _handle_message(self, message):
         command = re.search(b"^(?P<left>-?\d+),(?P<right>-?\d+)$", message)
