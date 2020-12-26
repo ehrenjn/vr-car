@@ -151,6 +151,7 @@ void setup() {
   }
   
   size(640, 480);
+  println("setup done");
 }
 
 
@@ -243,10 +244,10 @@ void keyPressed() {
         command = "-70,-70";
         break;
       case 'a': // left
-        command = "-70,70";
+        command = "-100,100";
         break;
       case 'd': // right
-        command = "70,-70";
+        command = "100,-100";
         break;
     }
     DRIVE_CLIENT.sendString(command); 
