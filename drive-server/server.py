@@ -1,6 +1,7 @@
 import RPi.GPIO as GPIO
 import socket
 import re
+from io import BytesIO
 
 
 IP = '0.0.0.0'
@@ -44,6 +45,29 @@ class Wheel:
 
 
 
+class StreamLineParser:
+
+    def __init__(self):
+        self._data = []
+
+
+    def get_lines(self, message):
+        self._data.extend(message)
+        num_lines = message.count(b'\n')
+        line_start = 0
+
+        for _ in range(num_lines):
+            line_end = self._data.index(ord('\n'), line_start) # ord because data is stored as ints now and not byte strings, also start searching at line_start
+            line = self._data[line_start:line_end]
+            print(line)
+            yield bytes(line)
+            line_start = line_end + 1
+
+        if line_start != 0:
+            self._data = self._data[line_start:]
+
+
+
 class TCPServer:
 
     MAX_MESSAGE_LENGTH = 100
@@ -70,18 +94,22 @@ class TCPServer:
 
 
     def _serve(self, client):
+        message_splitter = StreamLineParser()
         while True:
             try:
                 message = client.recv(TCPServer.MAX_MESSAGE_LENGTH)
-                if message == b'': # an empty string means the client has disconnected
-                    return True 
-                self._handle_message(message)
             except socket.timeout:
                 print("stopping car due to timeout")
                 self.left_wheel.move(0)
                 self.right_wheel.move(0) 
-            except ConnectionResetError: # this also means a client has disconnected
+            except ConnectionResetError: # this means a client has disconnected
                 return True
+            else: # recv was successful
+                if message == b'': # an empty string also means the client has disconnected
+                    return True 
+                else:
+                    for line in message_splitter.get_lines(message):
+                        self._handle_message(message)
 
 
     def _handle_message(self, message):

@@ -238,16 +238,16 @@ void keyPressed() {
     String command = "";
     switch (key) {
       case 'w': // forward
-        command = "70,70";
+        command = "70,70\n";
         break;
       case 's': // backward
-        command = "-70,-70";
+        command = "-70,-70\n";
         break;
       case 'a': // left
-        command = "-100,100";
+        command = "-100,100\n";
         break;
       case 'd': // right
-        command = "100,-100";
+        command = "100,-100\n";
         break;
     }
     DRIVE_CLIENT.sendString(command); 
@@ -257,6 +257,6 @@ void keyPressed() {
 
 void keyReleased() {
   if (DRIVE_KEYS.indexOf(key) != -1) {
-    DRIVE_CLIENT.sendString("0,0");
+    DRIVE_CLIENT.sendString("0,0\n");
   }
 }
