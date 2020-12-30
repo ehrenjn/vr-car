@@ -157,7 +157,7 @@ void setup() {
 
 void driveClientHeartbeat() {
   for (;;) {
-    DRIVE_CLIENT.sendBytes("heartbeat".getBytes()); 
+    DRIVE_CLIENT.sendBytes("heartbeat\n".getBytes()); 
     delay(1000);
   }
 }
@@ -250,6 +250,7 @@ void keyPressed() {
         command = "100,-100\n";
         break;
     }
+    println("sending command: " + command);
     DRIVE_CLIENT.sendString(command); 
   }
 }
