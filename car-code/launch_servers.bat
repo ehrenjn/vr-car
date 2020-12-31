@@ -1,1 +1,1 @@
-"C:\Program Files\Git\usr\bin\bash.exe" ".\build.sh" %1
+"C:\Program Files\Git\usr\bin\bash.exe" ".\launch_servers.sh" %1

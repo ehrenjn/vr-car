@@ -1,1 +1,1 @@
-ssh -i ~/.ssh/pi_vr_car_key pi@${1} "/bin/bash ~/vr-car/car-code/launch_servers_local.sh"
+ssh -i ~/.ssh/pi_vr_car_key pi@${1} ". ~/vr-car/car-code/launch_servers_local.sh"
