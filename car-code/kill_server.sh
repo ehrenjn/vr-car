@@ -6,7 +6,7 @@ pid=$(
 )
 
 if [ -z "${pid}" ]; then # if pid is an empty string
-    echo "no vision_server PID found"
+    echo "no PID for '$1' found"
 elif [[ ${pid} = *[[:space:]]* ]]; then # if there are multiple pids
     echo "multiple possible processes found, not sure which one to kill"
 else
