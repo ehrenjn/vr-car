@@ -1,4 +1,4 @@
-vr_car_home="~/vr-car/"
+vr_car_home="${HOME}/vr-car/" # have to use $HOME instead of ~ because it won't expand properly otherwise
 
 # kill servers first
 echo "killing running servers"
