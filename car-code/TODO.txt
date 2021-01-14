@@ -1,0 +1,8 @@
+software:
+- allow client to reconnect to vision server
+- for some reason launch_servers.bat doesn't print out anything from the drive server even though it does print out stuff from the vision server
+
+hardware:
+- figure out wtf is up with depth and rgb not working at the same time
+	probably because undervolting, test with old pi
+- move wires so kinect can actually tilt

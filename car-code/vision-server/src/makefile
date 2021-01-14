@@ -5,4 +5,4 @@ run:
 	./vision_server
 
 kill:
-	/bin/bash ./kill_server.sh
+	/bin/bash ./../../kill_server.sh vision_server

@@ -1,13 +1,21 @@
-import RPi.GPIO as GPIO
 import socket
 import re
-from io import BytesIO
 
+DISABLE_GPIO = False # change this to True force disable GPIO
+
+if not DISABLE_GPIO:
+    try:
+        import RPi.GPIO as GPIO
+    except ImportError:
+        print("WARNING: RPi.GPIO COULD NOT BE IMPORTED, disabling GPIO")
+        DISABLE_GPIO = True
+    else:
+        GPIO.setmode(GPIO.BOARD) # use BOARD pin numbering so that we can switch out pis and the same pins work (hopefully)
+else:
+    print("GPIO is disabled because DISABLE_GPIO is set to true")
 
 IP = '0.0.0.0'
 PORT = 55555
-
-GPIO.setmode(GPIO.BOARD) # use BOARD pin numbering so that we can switch out pis and the same pins work (hopefully)
 
 
 
@@ -42,6 +50,15 @@ class Wheel:
 
     def backward(self, speed):
         self.move(-speed)
+
+
+
+class WheelMock(Wheel):
+
+    def __init__(*args): pass
+
+    def move(self, speed):
+        print("wheel changing to {} speed".format(speed))
 
 
 
@@ -130,10 +147,12 @@ class TCPServer:
 
 
 if __name__ == "__main__":
-    left = Wheel(24, 26, 32)
-    right = Wheel(18, 22, 12)
+    make_wheel = WheelMock if DISABLE_GPIO else Wheel
+    left = make_wheel(24, 26, 32)
+    right = make_wheel(18, 22, 12)
     server = TCPServer(IP, PORT, left, right)
     server.serve_until_shutdown()
 
 
-GPIO.cleanup()
+if not DISABLE_GPIO:
+    GPIO.cleanup()
