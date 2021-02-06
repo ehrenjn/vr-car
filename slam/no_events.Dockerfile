@@ -7,7 +7,7 @@
 # pre build:
     # have to get camera data first from above link and make sure it is in a folder called stereo_20Hz
     # put stero_20Hz folder in vr-car/slam/rtabmap_source/NoEventsExample
-# building: `docker build -t poc -f POC.Dockerfile .`
+# building: `docker build -t no_events -f no_events.Dockerfile .`
 # pre run:
     # get xserver so the gui works
         # download vcxsrc on windows (https://sourceforge.net/projects/vcxsrv/)
@@ -15,7 +15,7 @@
             # choose all default settings except for "disable access control" (you want it on so any shmuck can connect)
     # find your docker IP 
         # do ipconfig and then look under "Ethernet adapter VirtualBox Host-Only Network"
-# to run: `docker run --volume <absolute path to vr-car/slam/rtabmap_source/>:/root/poc poc <your docker ip here>`
+# to run: `docker run --volume <absolute path to vr-car/slam/rtabmap_source/>:/root/no_events no_events <your docker ip here>`
     # make sure you use the *absolute path* or it won't work
     # if your absolute path has spaces in it, put the whole path in quotes
     # even though the absolute path is on windows, you should use forward slashes
