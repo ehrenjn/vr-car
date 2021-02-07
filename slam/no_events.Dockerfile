@@ -26,8 +26,5 @@
 
 FROM introlab3it/rtabmap:latest
 
-# add script to run on startup
-ADD run_example.sh /root/run_example.sh
-
 # run example as soon as container starts
-ENTRYPOINT ["/root/run_example.sh"]
+ENTRYPOINT ["/root/no_events/NoEventsExample/run_example.sh"]
