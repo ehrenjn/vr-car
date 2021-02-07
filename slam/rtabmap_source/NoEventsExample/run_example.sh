@@ -10,6 +10,6 @@ cd /root/no_events/NoEventsExample \
     && cmake . \
     && make \
     && ./noEventsExample 2 1 2 stereo_20Hz stereo_20Hz stereo_20Hz/left_NEW stereo_20Hz/right_NEW
-    # args: camera_rate (fps) odom_update (frames per update) map_update (hz) calibration_dir calibration_name path_left_images path_right_images
+    # args: camera_rate (fps) odom_update (frames per odometry update) map_update (how many odometry updates to wait before doing one map update) calibration_dir calibration_name path_left_images path_right_images
     # default values: 20 2 10
     # good values for 2 fps data: 2 1 2
