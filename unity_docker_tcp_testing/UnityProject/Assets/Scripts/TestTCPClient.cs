@@ -50,8 +50,6 @@ public class TestTCPClient : MonoBehaviour
             Debug.Log("SocketException:");
             Debug.Log(e);
         }
-
-        Debug.Log("\n Press Enter to continue...");
     }
 
     public static void Main()
