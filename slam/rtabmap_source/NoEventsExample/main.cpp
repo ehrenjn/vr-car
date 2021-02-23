@@ -33,6 +33,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/Odometry.h>
 #include <QApplication>
 #include <stdio.h>
+#include <stdint.h>
+#include "communicator/TCPCommunicator.h"
 
 using namespace rtabmap;
 
@@ -54,10 +56,55 @@ void showUsage()
 	exit(1);
 }
 
+/*
+void sendCloud(pcl::PointCloud<pcl::PointXYZRGB> cloud) {//, Transform pose) {
+	TCPServer communicator(7787);
+	communicator.connectToClient();
+	
+	uint8_t backingArray[100];
+	Message message = Message::createEmptyMessage(backingArray);
+
+	int poseSize = sizeof(float) * (3 + 4); // origin + orientation 
+	int cloudSize = cloud.width * sizeof(float) * 4; // ASSUMES CLOUD IS UNORGANIZED
+	message.setMetaData('c', cloudSize + poseSize);
+
+	float* dataPtr = reinterpret_cast<float*>(message.getStartOfData());
+	// UPDATE DATA WITH POSE INFO
+
+	pcl::PointCloud<pcl::PointXYZRGB>::const_iterator point;
+	for (point = cloud.begin(); point < cloud.end(); point++) {
+		std::cout << *point << std::endl;
+		dataPtr[0] = point->x;
+		dataPtr[1] = point->y;
+		dataPtr[2] = point->z;
+		dataPtr[3] = point->rgb;
+		dataPtr += 4;
+	}
+	communicator.sendMessage(message);
+}
+*/
+
 int main(int argc, char * argv[])
 {
 	ULogger::setType(ULogger::kTypeConsole);
 	ULogger::setLevel(ULogger::kError);
+
+	std::cout << "ABOUT TO RUN MY CODE" << std::endl;
+	pcl::PointCloud<pcl::PointXYZRGB> cloud;
+	pcl::PointXYZRGB point(0.1, 0.2, 0.3);
+	point.rgb = 69;
+	cloud.push_back(point);
+	pcl::PointXYZRGB point2(4.0f, 5.0f, 6.0f);
+	uint32_t rgb = 0x123456;
+	point2.rgb = *reinterpret_cast<float*>(&rgb);
+	cloud.push_back(point2);
+	pcl::PointCloud<pcl::PointXYZRGB>::const_iterator test;
+	for (test = cloud.begin(); test < cloud.end(); test++) {
+		std::cout << *test << std::endl;
+		std::cout << "x: " << test->x << " y: " << test->y << " z: " << test->z << std::endl;
+	}
+	//sendCloud(cloud);
+	std::cout << "GOT HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE" << std::endl;
 
 	if(argc < 8)
 	{

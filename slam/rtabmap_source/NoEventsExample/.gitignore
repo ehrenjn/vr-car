@@ -1,0 +1,10 @@
+*
+!.gitignore
+!CMakeLists.txt
+!MapBuilder.h
+!main.cpp
+!run_example.sh
+
+!no_events_test_client.cpp
+!communicator/
+!communicator/*

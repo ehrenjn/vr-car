@@ -39,6 +39,7 @@ SET(INCLUDE_DIRS
 	${RTABMap_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
+    ./communicator
 )
 
 IF(QT4_FOUND)
@@ -60,7 +61,7 @@ ELSE()
     QT5_WRAP_CPP(moc_srcs MapBuilder.h)
 ENDIF()
 
-ADD_EXECUTABLE(noEventsExample main.cpp ${moc_srcs})
+ADD_EXECUTABLE(noEventsExample main.cpp ${moc_srcs} ./communicator/TCPCommunicator.cpp)
   
 TARGET_LINK_LIBRARIES(noEventsExample ${LIBRARIES})
 
