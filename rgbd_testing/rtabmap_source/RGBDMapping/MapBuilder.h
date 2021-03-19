@@ -47,6 +47,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap/core/OdometryEvent.h"
 #include "rtabmap/core/CameraThread.h"
 
+#include "communicator/TCPCommunicator.h"
+#include <stdio.h>
+#define PORT 7787
+
 using namespace rtabmap;
 
 // This class receives RtabmapEvent and construct/update a 3D Map
@@ -59,7 +63,9 @@ public:
 		camera_(camera),
 		odometryCorrection_(Transform::getIdentity()),
 		processingStatistics_(false),
-		lastOdometryProcessed_(true)
+		lastOdometryProcessed_(true),
+		communicator(PORT),
+		message(Message::createEmptyMessage(backingArray))
 	{
 		this->setWindowFlags(Qt::Dialog);
 		this->setWindowTitle(tr("3D Map"));
@@ -79,6 +85,11 @@ public:
 		this->addAction(pause);
 		pause->setShortcut(Qt::Key_Space);
 		connect(pause, SIGNAL(triggered()), this, SLOT(pauseDetection()));
+
+		std::cout << "STARTED SERVER ON PORT " << PORT << std::endl;
+		std::cout << "WAITING FOR CLIENT..." << std::endl;
+		communicator.connectToClient();
+		std::cout << "CLIENT CONNECTED" << std::endl;
 	}
 
 	virtual ~MapBuilder()
@@ -138,6 +149,7 @@ protected Q_SLOTS:
 					4.0f); // max depth
 				if(cloud->size())
 				{
+					sendCloud(cloud, odometryCorrection_*pose);
 					if(!cloudViewer_->addCloud("cloudOdom", cloud, odometryCorrection_*pose))
 					{
 						UERROR("Adding cloudOdom to viewer failed!");
@@ -306,6 +318,47 @@ protected Q_SLOTS:
 		return false;
 	}
 
+
+	void sendCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, const Transform& pose) 
+	{
+		float* dataPtr = reinterpret_cast<float*>(message.getStartOfData());
+
+		// add origin to data
+		*dataPtr = pose.x(); dataPtr++;
+		*dataPtr = pose.y(); dataPtr++;
+		*dataPtr = pose.z(); dataPtr++;
+
+		// add orientation to data
+		Eigen::Quaternionf orientation = Eigen::Quaternionf(pose.toEigen3f().linear());
+		*dataPtr = orientation.x(); dataPtr++;
+		*dataPtr = orientation.y(); dataPtr++;
+		*dataPtr = orientation.z(); dataPtr++;
+		*dataPtr = orientation.w(); dataPtr++;
+
+		// add points to data
+		int numPointsToSend = 0;
+		pcl::PointCloud<pcl::PointXYZRGB>::const_iterator point;
+		for (point = cloud->begin(); point < cloud->end(); point++) {
+			if (!std::isnan(point->x) && !std::isnan(point->y) && !std::isnan(point->z)) // only send points that are non NaN
+			{
+				dataPtr[0] = point->x;
+				dataPtr[1] = point->y;
+				dataPtr[2] = point->z;
+				dataPtr[3] = point->rgb;
+				dataPtr += 4;
+				numPointsToSend ++;
+			}
+		}
+
+		// update Message metadata
+		int poseSize = sizeof(float) * (3 + 4); // origin + orientation 
+		int cloudSize = numPointsToSend * sizeof(float) * 4; 
+		message.setMetaData('c', cloudSize + poseSize);
+		
+		communicator.sendMessage(message);
+	}
+
+
 protected:
 	CloudViewer * cloudViewer_;
 	CameraThread * camera_;
@@ -314,6 +367,11 @@ protected:
 	bool processingStatistics_;
 	bool lastOdometryProcessed_;
 	OccupancyGrid grid_;
+
+private:
+	TCPServer communicator;
+	uint8_t backingArray[1000000];
+	Message message;
 };
 
 
